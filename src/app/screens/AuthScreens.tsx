@@ -1,5 +1,3 @@
-import type { Dispatch, SetStateAction } from 'react';
-
 import type { SessionData } from '../../types';
 import type { DrawerScreenKey, TranslateFn } from '../viewTypes';
 import { LOGO_SRC } from '../constants';
@@ -7,27 +5,13 @@ import { Ic } from '../ui';
 
 interface LoginScreenProps {
   t: TranslateFn;
-  loginVal: string;
-  setLoginVal: Dispatch<SetStateAction<string>>;
-  password: string;
-  setPassword: Dispatch<SetStateAction<string>>;
-  showPassword: boolean;
-  setShowPassword: Dispatch<SetStateAction<boolean>>;
   loginLoading: boolean;
-  onLoginSubmit: () => Promise<void> | void;
   onUsosLogin: () => Promise<void> | void;
 }
 
 export function LoginScreen({
   t,
-  loginVal,
-  setLoginVal,
-  password,
-  setPassword,
-  showPassword,
-  setShowPassword,
   loginLoading,
-  onLoginSubmit,
   onUsosLogin,
 }: LoginScreenProps) {
   return (
@@ -41,66 +25,14 @@ export function LoginScreen({
         <div className="login-card-title">{t('login.cardTitle')}</div>
 
         <div className="login-form">
-          <div className="login-field">
-            <label htmlFor="login-input" className="login-field-label">
-              <Ic n="user" />
-            </label>
-            <input
-              id="login-input"
-              type="text"
-              value={loginVal}
-              onChange={(e) => setLoginVal(e.target.value)}
-              placeholder={t('login.usernamePlaceholder') || 's12345 lub email'}
-              autoComplete="username"
-              onKeyDown={(e) => e.key === 'Enter' && void onLoginSubmit()}
-              className="login-field-input"
-            />
-          </div>
-
-          <div className="login-field">
-            <label htmlFor="password-input" className="login-field-label">
-              <Ic n="lock" />
-            </label>
-            <input
-              id="password-input"
-              type={showPassword ? 'text' : 'password'}
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder={t('login.password')}
-              autoComplete="current-password"
-              onKeyDown={(e) => e.key === 'Enter' && void onLoginSubmit()}
-              className="login-field-input"
-            />
-            <button
-              type="button"
-              className="login-field-toggle"
-              onClick={() => setShowPassword(!showPassword)}
-              aria-label={showPassword ? t('login.hidePassword') : t('login.showPassword')}
-            >
-              <Ic n="eye" />
-            </button>
-          </div>
-
-          <button
-            type="button"
-            onClick={() => void onLoginSubmit()}
-            disabled={loginLoading}
-            className="login-button"
-          >
-            {loginLoading ? t('login.loggingIn') : t('login.loginBtn')}
-          </button>
-
-          <div className="login-divider">
-            <span>{t('login.or') || 'lub'}</span>
-          </div>
-
           <button
             type="button"
             className="login-usos-btn"
             onClick={() => void onUsosLogin()}
+            disabled={loginLoading}
           >
             <div className="login-usos-icon">U</div>
-            {t('login.usosBtn') || 'Zaloguj przez USOS'}
+            {loginLoading ? t('login.loggingIn') : (t('login.usosBtn') || 'Zaloguj przez USOS')}
           </button>
 
           <p className="login-info-text" style={{ whiteSpace: 'pre-line' }}>

@@ -30,7 +30,6 @@ import {
   fetchPlanWindow,
   fetchUsosRequestToken,
   isSessionExpiredError,
-  login,
   loginWithUsos,
   savePlanHiddenSubjects as savePlanHiddenSubjectsByAlbum,
   type PlanWindowData,
@@ -1476,32 +1475,6 @@ function App() {
   ]);
 
   // ── Login ─────────────────────────────────────────────────────────────────
-  const [loginVal, setLoginVal] = useState('');
-  const [password, setPassword] = useState('');
-  const [showPassword, setShowPassword] = useState(false);
-  const [loginLoading, setLoginLoading] = useState(false);
-
-  async function onLoginSubmit() {
-    if (!loginVal.trim()) { setGlobalError('Wpisz numer albumu.'); return; }
-    if (!password.trim()) { setGlobalError('Wpisz hasło.'); return; }
-    setLoginLoading(true);
-    setGlobalError('');
-    try {
-      const s = await login(loginVal, password);
-      applySession(s);
-      setPassword('');
-      showToast('Zalogowano poprawnie');
-      // Show install tip once after first login (not in standalone PWA)
-      if (canOfferInstall && !localStorage.getItem(INSTALL_TIP_KEY)) {
-        setTimeout(() => setShowInstallTip(true), 800);
-      }
-    } catch (e) {
-      setGlobalError(e instanceof Error ? e.message : 'Logowanie nieudane.');
-    } finally {
-      setLoginLoading(false);
-    }
-  }
-
   // ── Install tip helpers ───────────────────────────────────────────────────
   const dismissInstallTip = () => {
     localStorage.setItem(INSTALL_TIP_KEY, '1');
@@ -1614,14 +1587,7 @@ function App() {
     return (
       <LoginScreen
         t={t}
-        loginVal={loginVal}
-        setLoginVal={setLoginVal}
-        password={password}
-        setPassword={setPassword}
-        showPassword={showPassword}
-        setShowPassword={setShowPassword}
-        loginLoading={loginLoading}
-        onLoginSubmit={onLoginSubmit}
+        loginLoading={globalLoading}
         onUsosLogin={async () => {
           setGlobalLoad(true);
           try {

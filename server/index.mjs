@@ -23,10 +23,8 @@ const USOS_CONSUMER_KEY = process.env.USOS_CONSUMER_KEY || '';
 const USOS_CONSUMER_SECRET = process.env.USOS_CONSUMER_SECRET || '';
 const USOS_BASE_URL = (process.env.USOS_BASE_URL || 'https://usosapi.zut.edu.pl/').replace(/\/+$/, '') + '/';
 
-const MZUT_API_BASE = 'https://www.zut.edu.pl/app-json-proxy/index.php';
 const PLAN_STUDENT_BASE = 'https://plan.zut.edu.pl/schedule_student.php';
 const PLAN_SUGGEST_BASE = 'https://plan.zut.edu.pl/schedule.php';
-const RSS_URL = 'https://www.zut.edu.pl/rssfeed-studenci';
 const REQUEST_TIMEOUT_MS = 20_000;
 const APP_BASE_PATH = (() => {
   const raw = String(process.env.VITE_APP_BASE || '/v2').trim();
@@ -65,21 +63,6 @@ app.use((req, _res, next) => {
   }
   next();
 });
-
-function sanitizeFunctionName(value) {
-  const fn = String(value || '').trim();
-  return /^[a-zA-Z0-9_]+$/.test(fn) ? fn : '';
-}
-
-function sanitizeParams(value) {
-  if (!value || typeof value !== 'object') return {};
-  const out = {};
-  for (const [key, raw] of Object.entries(value)) {
-    if (!/^[a-zA-Z0-9_]+$/.test(key)) continue;
-    out[key] = String(raw ?? '');
-  }
-  return out;
-}
 
 function normalizeAlbumKey(value) {
   const album = String(value || '').trim();
@@ -323,45 +306,6 @@ app.put('/api/plan-hidden-subjects/:album', (req, res) => {
   });
 });
 
-app.post('/api/proxy/mzut', async (req, res) => {
-  try {
-    const fn = sanitizeFunctionName(req.body?.fn);
-    const params = sanitizeParams(req.body?.params);
-
-    if (!fn) {
-      return res.status(400).json({ error: 'Brak poprawnej funkcji ZUT' });
-    }
-
-    const url = `${MZUT_API_BASE}?f=${encodeURIComponent(fn)}`;
-    const body = new URLSearchParams();
-    for (const [key, value] of Object.entries(params)) {
-      body.set(key, value);
-    }
-
-    const response = await fetchWithTimeout(url, {
-      method: 'POST',
-      headers: {
-        'User-Agent': 'ZUTnik-PWA-Proxy/1.0',
-        'Content-Type': 'application/x-www-form-urlencoded; charset=utf-8',
-      },
-      body,
-    });
-
-    if (!response.ok) {
-      return res.status(response.status).json({ error: `Upstream ZUT HTTP ${response.status}` });
-    }
-
-    const data = await passthroughJson(response);
-    const status = String(data?.logInStatus || data?.loginInStatus || '').trim().toUpperCase();
-    if (fn === 'getAuthorization' && status === 'OK') {
-      statsService.recordSuccessfulLogin(req, 'mzut');
-    }
-    return res.json({ data });
-  } catch (error) {
-    return res.status(502).json({ error: `Proxy ZUT error: ${error.message}` });
-  }
-});
-
 app.get('/api/proxy/plan-student', async (req, res) => {
   try {
     const query = new URLSearchParams();
@@ -410,41 +354,6 @@ app.get('/api/proxy/plan-suggest', async (req, res) => {
   }
 });
 
-app.get('/api/proxy/image', async (req, res) => {
-  try {
-    const userId = String(req.query.userId ?? '').trim();
-    const tokenJpg = String(req.query.tokenJpg ?? '').trim();
-    if (!userId || !tokenJpg) {
-      return res.status(400).json({ error: 'Missing userId or tokenJpg' });
-    }
-
-    const url = `https://www.zut.edu.pl/app-json-proxy/image/?userId=${encodeURIComponent(userId)}&tokenJpg=${encodeURIComponent(tokenJpg)}`;
-    const response = await fetchWithTimeout(url, {
-      headers: { 'User-Agent': 'ZUTnik-PWA-Proxy/1.0' },
-    });
-
-    if (!response.ok) {
-      return res.status(response.status).end();
-    }
-
-    const buffer = Buffer.from(await response.arrayBuffer());
-
-    if (buffer.length === 0) {
-      return res.status(404).end();
-    }
-
-    // ZUT returns JPEG with wrong Content-Type (text/html), detect from magic bytes
-    let contentType = 'image/jpeg';
-    if (buffer[0] === 0x89 && buffer[1] === 0x50) contentType = 'image/png';
-    else if (buffer[0] === 0x47 && buffer[1] === 0x49) contentType = 'image/gif';
-    res.set('Content-Type', contentType);
-    res.set('Cache-Control', 'public, max-age=86400');
-    return res.send(buffer);
-  } catch (error) {
-    return res.status(502).json({ error: `Image proxy error: ${error.message}` });
-  }
-});
-
 app.get('/api/usos/image', async (req, res) => {
   try {
     const url = String(req.query.url ?? '').trim();
@@ -480,7 +389,7 @@ app.get('/api/usos/image', async (req, res) => {
 
 app.get('/api/usos/request-token', async (req, res) => {
   try {
-    const scopes = String(req.query.scopes || 'studies|grades|personal|photo|email|mobile_numbers|payments|cards');
+    const scopes = String(req.query.scopes || 'studies|personal|photo');
     const callbackUrl = String(req.query.callbackUrl || '');
 
     const url = `${USOS_BASE_URL}services/oauth/request_token`;
@@ -561,55 +470,69 @@ app.post('/api/usos/access-token', async (req, res) => {
   }
 });
 
-app.post('/api/usos/proxy', async (req, res) => {
+async function fetchUsosJson(endpoint, token, secret, params = {}) {
+  const baseUrl = `${USOS_BASE_URL}${endpoint.startsWith('/') ? endpoint.slice(1) : endpoint}`;
+  const oauthParams = {
+    ...baseOAuthParams(),
+    oauth_token: token,
+  };
+
+  const cleanParams = {};
+  for (const [key, value] of Object.entries(params)) {
+    cleanParams[key] = String(value ?? '');
+  }
+
+  const sig = signOAuth1('GET', baseUrl, { ...oauthParams, ...cleanParams }, USOS_CONSUMER_SECRET, secret);
+  const authHeader = getAuthHeader(oauthParams, sig);
+
+  let fullUrl = baseUrl;
+  if (Object.keys(cleanParams).length > 0) {
+    fullUrl += `?${new URLSearchParams(cleanParams).toString()}`;
+  }
+
+  const response = await fetchWithTimeout(fullUrl, {
+    method: 'GET',
+    headers: {
+      'Authorization': authHeader,
+      'User-Agent': 'ZUTnik-PWA-Proxy/1.0',
+    },
+  });
+
+  const body = await response.text();
+  if (!response.ok) {
+    const error = new Error(`USOS API error: ${body}`);
+    error.status = response.status;
+    throw error;
+  }
+
+  return body.trim() ? JSON.parse(body) : null;
+}
+
+app.post('/api/usos/me', async (req, res) => {
   try {
-    const { endpoint, token, secret, params = {} } = req.body;
-    if (!endpoint || !token || !secret) {
-      return res.status(400).json({ error: 'Missing endpoint or credentials' });
+    const { token, secret } = req.body ?? {};
+    if (!token || !secret) {
+      return res.status(400).json({ error: 'Missing USOS credentials' });
     }
 
-    const baseUrl = `${USOS_BASE_URL}${endpoint.startsWith('/') ? endpoint.slice(1) : endpoint}`;
-
-    const oauthParams = {
-      ...baseOAuthParams(),
-      oauth_token: token
-    };
-
-    const allForSig = { ...oauthParams, ...params };
-    const sig = signOAuth1('GET', baseUrl, allForSig, USOS_CONSUMER_SECRET, secret);
-    const authHeader = getAuthHeader(oauthParams, sig);
-
-    // USOS quirk: query parameters should NOT be percent encoded for commas etc.
-    // but the parameters in the signature base string SHOULD be.
-    // fetch URL builder will encode them, so we build it manually or use a trick.
-    let fullUrl = baseUrl;
-    if (Object.keys(params).length > 0) {
-      const query = Object.entries(params)
-        .map(([k, v]) => `${k}=${v}`) // No encoding here, just like in Android buildUrl()
-        .join('&');
-      fullUrl += `?${query}`;
-    }
-
-    const response = await fetchWithTimeout(fullUrl, {
-      method: 'GET',
-      headers: {
-        'Authorization': authHeader,
-        'User-Agent': 'ZUTnik-PWA-Proxy/1.0'
-      }
+    const user = await fetchUsosJson('services/users/user', token, secret, {
+      fields: 'id|first_name|last_name|student_number|photo_urls',
     });
 
-    const body = await response.text();
-    if (!response.ok) {
-      return res.status(response.status).json({ error: `USOS API error: ${body}` });
+    let programmes = [];
+    try {
+      programmes = await fetchUsosJson('services/progs/student', token, secret, {
+        fields: 'programme[id|description|mode_of_studies|level_of_studies]|status',
+        active_only: 'false',
+      });
+      if (!Array.isArray(programmes)) programmes = [];
+    } catch {
+      programmes = [];
     }
 
-    try {
-      return res.json(JSON.parse(body));
-    } catch {
-      return res.send(body);
-    }
+    return res.json({ user, programmes });
   } catch (error) {
-    return res.status(500).json({ error: error.message });
+    return res.status(error.status || 500).json({ error: error.message });
   }
 });
 
@@ -714,23 +637,6 @@ app.get('/api/proxy/calendar', async (_req, res) => {
     return res.json({ periods: calendarCache ?? [] });
   } catch (error) {
     return res.status(502).json({ error: `Calendar proxy error: ${error.message}`, periods: [] });
-  }
-});
-
-app.get('/api/proxy/rss', async (_req, res) => {
-  try {
-    const response = await fetchWithTimeout(RSS_URL, {
-      headers: { 'User-Agent': 'ZUTnik-PWA-Proxy/1.0' },
-    });
-
-    if (!response.ok) {
-      return res.status(response.status).json({ error: `Upstream RSS HTTP ${response.status}` });
-    }
-
-    const xml = await response.text();
-    return res.json({ xml });
-  } catch (error) {
-    return res.status(502).json({ error: `Proxy RSS error: ${error.message}` });
   }
 });
 

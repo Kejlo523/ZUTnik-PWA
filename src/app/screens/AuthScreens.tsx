@@ -33,8 +33,8 @@ export function LoginScreen({
   return (
     <section className="screen login-screen">
       <div className="login-header">
-        <img src={LOGO_SRC} alt="mZUT v2" className="login-logo" />
-        <h1 className="login-title">mzutv2</h1>
+        <img src={LOGO_SRC} alt="ZUTnik" className="login-logo" />
+        <h1 className="login-title">ZUTnik</h1>
       </div>
 
       <div className="login-card">
@@ -100,7 +100,7 @@ export function LoginScreen({
             onClick={() => void onUsosLogin()}
           >
             <div className="login-usos-icon">U</div>
-            {(t('login.usosBtn') || 'Zaloguj przez USOS') + ' (Wczesny dostęp)'}
+            {t('login.usosBtn') || 'Zaloguj przez USOS'}
           </button>
 
           <p className="login-info-text" style={{ whiteSpace: 'pre-line' }}>

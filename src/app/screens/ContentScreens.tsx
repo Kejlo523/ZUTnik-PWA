@@ -246,10 +246,10 @@ export function AboutScreen({ canOfferInstall, handleInstallPwa, isIosSafari, t 
       <div className="about-overview">
         <div className="about-hero card">
           <div className="about-hero-head">
-            <img src={LOGO_SRC} alt="Logo mZUT v2" className="about-logo-img" />
+            <img src={LOGO_SRC} alt="Logo ZUTnik" className="about-logo-img" />
             <div className="about-hero-copy">
-              <div className="about-app-name">mZUT v2</div>
-              <div className="about-version">1.42 (PWA)</div>
+              <div className="about-app-name">ZUTnik</div>
+              <div className="about-version">2.0 (PWA)</div>
               <div className="about-note">{t('about.pwaNote')}</div>
             </div>
           </div>
@@ -276,16 +276,7 @@ export function AboutScreen({ canOfferInstall, handleInstallPwa, isIosSafari, t 
 
       <div className="about-panels">
         <div className="about-actions">
-          <a href="https://play.google.com/store/apps/details?id=pl.kejlo.mzutv2" target="_blank" rel="noreferrer" className="about-action-card">
-            <div className="about-action-icon">⭐</div>
-            <div className="about-action-content">
-              <div className="about-action-title">{t('about.rateApp')}</div>
-              <div className="about-action-desc">{t('about.rateDesc')}</div>
-            </div>
-            <div className="about-action-arrow">→</div>
-          </a>
-
-          <a href="https://github.com/Kejlo523/mzut-v2" target="_blank" rel="noreferrer" className="about-action-card">
+          <a href="https://github.com/Kejlo523" target="_blank" rel="noreferrer" className="about-action-card">
             <div className="about-action-icon">📝</div>
             <div className="about-action-content">
               <div className="about-action-title">{t('about.sourceCode')}</div>
@@ -296,7 +287,7 @@ export function AboutScreen({ canOfferInstall, handleInstallPwa, isIosSafari, t 
         </div>
 
         <div className="about-links">
-          <a href="https://mzut.endozero.pl" target="_blank" rel="noreferrer" className="about-link-item">
+          <a href="https://endozero.pl" target="_blank" rel="noreferrer" className="about-link-item">
             <span className="about-link-icon">ℹ️</span>
             <span className="about-link-text">{t('about.projectSite')}</span>
             <span className="about-link-arrow">→</span>
@@ -308,7 +299,7 @@ export function AboutScreen({ canOfferInstall, handleInstallPwa, isIosSafari, t 
             <span className="about-link-arrow">→</span>
           </a>
 
-          <a href="https://mzut.endozero.pl/privacy_policy.html" target="_blank" rel="noreferrer" className="about-link-item">
+          <a href="https://endozero.pl" target="_blank" rel="noreferrer" className="about-link-item">
             <span className="about-link-icon">🔒</span>
             <span className="about-link-text">{t('about.privacyPolicy')}</span>
             <span className="about-link-arrow">→</span>

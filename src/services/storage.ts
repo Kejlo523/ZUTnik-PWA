@@ -12,10 +12,15 @@ import type {
   StudyHistoryItem,
 } from '../types';
 
-const SESSION_KEY = 'mzutv2_pwa_session';
-const SETTINGS_KEY = 'mzutv2_pwa_settings';
+const SESSION_KEY = 'zutnik_pwa_session';
+const SETTINGS_KEY = 'zutnik_pwa_settings';
+const PLAN_FILTERS_KEY = 'zutnik_pwa_plan_hidden_subjects';
+const DEVICE_ID_KEY = 'zutnik_pwa_device_id';
+
+const LEGACY_SESSION_KEY = 'mzutv2_pwa_session';
+const LEGACY_SETTINGS_KEY = 'mzutv2_pwa_settings';
 const LEGACY_PLAN_FILTERS_KEY = 'mzutv2_pwa_plan_hidden_subjects';
-const DEVICE_ID_KEY = 'mzutv2_pwa_device_id';
+const LEGACY_DEVICE_ID_KEY = 'mzutv2_pwa_device_id';
 
 export interface AppSettings {
   language: 'pl' | 'en';
@@ -35,7 +40,7 @@ const defaultSettings: AppSettings = {
 
 export function loadSession(): SessionData | null {
   try {
-    const raw = window.localStorage.getItem(SESSION_KEY);
+    const raw = window.localStorage.getItem(SESSION_KEY) ?? window.localStorage.getItem(LEGACY_SESSION_KEY);
     if (!raw) return null;
     const parsed = JSON.parse(raw) as SessionData;
     if (!parsed.userId || (!parsed.authKey && !parsed.usos?.accessToken)) return null;
@@ -59,6 +64,7 @@ export function loadSession(): SessionData | null {
     parsed.persistedAt = Date.now();
 
     window.localStorage.setItem(SESSION_KEY, JSON.stringify(parsed));
+    window.localStorage.removeItem(LEGACY_SESSION_KEY);
     return parsed;
   } catch {
     return null;
@@ -68,6 +74,7 @@ export function loadSession(): SessionData | null {
 export function saveSession(session: SessionData | null): void {
   if (!session) {
     window.localStorage.removeItem(SESSION_KEY);
+    window.localStorage.removeItem(LEGACY_SESSION_KEY);
     return;
   }
   window.localStorage.setItem(SESSION_KEY, JSON.stringify({
@@ -78,16 +85,19 @@ export function saveSession(session: SessionData | null): void {
 
 export function loadSettings(): AppSettings {
   try {
-    const raw = window.localStorage.getItem(SETTINGS_KEY);
+    const raw = window.localStorage.getItem(SETTINGS_KEY) ?? window.localStorage.getItem(LEGACY_SETTINGS_KEY);
     if (!raw) return { ...defaultSettings };
     const parsed = JSON.parse(raw) as Partial<AppSettings>;
-    return {
+    const settings: AppSettings = {
       language: parsed.language === 'en' ? 'en' : 'pl',
       notificationsEnabled: typeof parsed.notificationsEnabled === 'boolean' ? parsed.notificationsEnabled : true,
       refreshMinutes: [30, 60, 120].includes(parsed.refreshMinutes ?? 30) ? (parsed.refreshMinutes as 30 | 60 | 120) : 30,
       compactPlan: Boolean(parsed.compactPlan),
       gradesGrouping: typeof parsed.gradesGrouping === 'boolean' ? parsed.gradesGrouping : true,
     };
+    window.localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+    window.localStorage.removeItem(LEGACY_SETTINGS_KEY);
+    return settings;
   } catch {
     return { ...defaultSettings };
   }
@@ -99,7 +109,7 @@ export function saveSettings(settings: AppSettings): void {
 
 export function loadLegacyPlanHiddenSubjects(): string[] {
   try {
-    const raw = window.localStorage.getItem(LEGACY_PLAN_FILTERS_KEY);
+    const raw = window.localStorage.getItem(PLAN_FILTERS_KEY) ?? window.localStorage.getItem(LEGACY_PLAN_FILTERS_KEY);
     if (!raw) return [];
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed)) return [];
@@ -114,23 +124,26 @@ export function loadLegacyPlanHiddenSubjects(): string[] {
 
 export function clearLegacyPlanHiddenSubjects(): void {
   window.localStorage.removeItem(LEGACY_PLAN_FILTERS_KEY);
+  window.localStorage.removeItem(PLAN_FILTERS_KEY);
 }
 
 export function loadOrCreateDeviceId(): string {
   try {
-    const existing = window.localStorage.getItem(DEVICE_ID_KEY)?.trim();
+    const existing = (window.localStorage.getItem(DEVICE_ID_KEY) ?? window.localStorage.getItem(LEGACY_DEVICE_ID_KEY))?.trim();
     if (existing) {
+      window.localStorage.setItem(DEVICE_ID_KEY, existing);
+      window.localStorage.removeItem(LEGACY_DEVICE_ID_KEY);
       return existing;
     }
 
     const next = typeof window.crypto?.randomUUID === 'function'
       ? window.crypto.randomUUID()
-      : `mzutv2-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+      : `zutnik-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 
     window.localStorage.setItem(DEVICE_ID_KEY, next);
     return next;
   } catch {
-    return `mzutv2-volatile-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+    return `zutnik-volatile-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
   }
 }
 
@@ -152,7 +165,7 @@ const TTL_MS = {
 };
 
 function ck(name: string, suffix = ''): string {
-  return `mzutv2_c_${name}${suffix ? `_${suffix}` : ''}`;
+  return `zutnik_c_${name}${suffix ? `_${suffix}` : ''}`;
 }
 
 function saveC<T>(key: string, data: T): void {

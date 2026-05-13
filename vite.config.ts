@@ -31,19 +31,19 @@ export default defineConfig({
     react(),
     VitePWA({
       registerType: 'autoUpdate',
-      includeAssets: ['icons/icon-192.png', 'icons/icon-512.png', 'icons/icon-maskable-512.png'],
+      includeAssets: ['icons/zutnik-logo.png', 'icons/icon-192.png', 'icons/icon-512.png', 'icons/icon-maskable-512.png'],
       manifest: {
         id: `${appBase}?source=pwa`,
-        name: 'mzutv2',
-        short_name: 'mzutv2',
-        description: 'Nieoficjalny klient ZUT dla studentów – plan zajęć, oceny, aktualności',
+        name: 'ZUTnik',
+        short_name: 'ZUTnik',
+        description: 'Nieoficjalny asystent studenta ZUT: plan zajęć, oceny, finanse i aktualności',
         start_url: `${appBase}?source=pwa`,
         scope: appBase,
         display: 'standalone',
         display_override: ['standalone', 'minimal-ui'],
         orientation: 'any',
-        background_color: '#050505',
-        theme_color: '#1e1e1e',
+        background_color: '#071015',
+        theme_color: '#0f1f2a',
         lang: 'pl',
         icons: [
           {

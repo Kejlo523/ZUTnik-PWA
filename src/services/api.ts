@@ -166,7 +166,7 @@ function randomString(length: number, alphabet: string[]): string {
 
 function createApiRequestInit(init: RequestInit = {}): RequestInit {
   const headers = new Headers(init.headers ?? {});
-  headers.set('X-mZUT-Device-Id', DEVICE_ID);
+  headers.set('X-ZUTnik-Device-Id', DEVICE_ID);
   return { ...init, headers };
 }
 
@@ -210,7 +210,7 @@ async function proxyMzut<T = Record<string, unknown>>(fn: string, params: Record
   });
 
   const body = (await response.json().catch(() => ({}))) as { data: T; error: string };
-  const errorMessage = body.error || `mZUT proxy HTTP ${response.status}`;
+  const errorMessage = body.error || `ZUT proxy HTTP ${response.status}`;
   if (!response.ok) {
     if (hasHttpAuthError(response.status, errorMessage)) {
       throw new SessionExpiredError();
@@ -414,7 +414,7 @@ export async function login(loginValue: string, password: string): Promise<Sessi
 
   const status = firstNonEmpty(payload.logInStatus, payload.loginInStatus).toUpperCase();
   if (status !== 'OK') {
-    if (status === 'SYSTEM ERROR') throw new Error('Błąd systemu mZUT.');
+    if (status === 'SYSTEM ERROR') throw new Error('Błąd systemu ZUT.');
     throw new Error('Niepoprawny login lub hasło.');
   }
 
@@ -460,7 +460,7 @@ export async function loginWithUsos(verifier: string, token: string, secret: str
     accessTokenSecret: body.oauth_token_secret,
   };
 
-  // Once logged into USOS, we also need mZUT session to fetch the plan (which uses album number).
+  // Once logged into USOS, we still need the legacy ZUT session to fetch the plan (which uses album number).
   // Strategy: Try to find student in USOS, get their details.
   const sessionStub: SessionData = {
     userId: 'usos_user',

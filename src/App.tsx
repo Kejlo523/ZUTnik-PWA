@@ -195,7 +195,7 @@ function App() {
   // On iOS Safari user installs manually via Share sheet — we can offer instructions
   const canOfferInstall = !isStandalone && (canInstallPwa || isIosSafari);
 
-  const INSTALL_TIP_KEY = 'mzutv2_install_tip_v1';
+  const INSTALL_TIP_KEY = 'zutnik_install_tip_v1';
   const [showInstallTip, setShowInstallTip] = useState(false);
   const [installTipFading, setInstallTipFading] = useState(false);
   const [showIosInstructions, setShowIosInstructions] = useState(false);
@@ -1019,7 +1019,7 @@ function App() {
       }
 
       const semFingerprint = safeSems.map(s => s.listaSemestrowId).join('|');
-      const totalEctsCacheKey = `mzutv2_total_ects_${session.userId}_${activeStudyId}`;
+      const totalEctsCacheKey = `zutnik_total_ects_${session.userId}_${activeStudyId}`;
       try {
         const cachedRaw = window.localStorage.getItem(totalEctsCacheKey);
         if (cachedRaw) {
@@ -2635,9 +2635,9 @@ function App() {
           <button type="button" className="drawer-backdrop" onClick={() => setDrawerOpen(false)} aria-label={t('general.closeMenu')} />
           <aside className="drawer-panel" role="navigation" aria-label={t('general.openMenu')}>
             <div className="drawer-header">
-              <img src={LOGO_SRC} alt="mZUT v2" className="drawer-header-logo" />
+              <img src={LOGO_SRC} alt="ZUTnik" className="drawer-header-logo" />
               <div className="drawer-header-info">
-                <div className="drawer-header-title">mZUT v2</div>
+                <div className="drawer-header-title">ZUTnik</div>
                 <div className="drawer-header-user">{session?.username || t('info.studentNameFallback')}</div>
               </div>
             </div>

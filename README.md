@@ -1,6 +1,6 @@
-# mzut-v2-pwa
+# ZUTnik PWA
 
-PWA wersja mZUT v2 w modelu **client-side first**.
+Nieoficjalny asystent studenta ZUT w modelu **client-side first**.
 
 ## Architektura
 

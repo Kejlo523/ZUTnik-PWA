@@ -43,22 +43,12 @@ export function loadSession(): SessionData | null {
     const raw = window.localStorage.getItem(SESSION_KEY) ?? window.localStorage.getItem(LEGACY_SESSION_KEY);
     if (!raw) return null;
     const parsed = JSON.parse(raw) as SessionData;
-    if (!parsed.userId || (!parsed.authKey && !parsed.usos?.accessToken)) return null;
+    if (!parsed.userId || !parsed.usos?.accessToken || !parsed.usos?.accessTokenSecret) return null;
 
-    // Migrate: extract tokenJpg from old imageUrl if not stored separately
-    if (!parsed.tokenJpg && parsed.imageUrl) {
-      try {
-        const imgUrl = parsed.imageUrl.startsWith('http')
-          ? new URL(parsed.imageUrl)
-          : new URL(parsed.imageUrl, 'http://localhost');
-        const tj = imgUrl.searchParams.get('tokenJpg') || '';
-        if (tj) parsed.tokenJpg = tj;
-      } catch { /* ignore */ }
-    }
-
-    // Always reconstruct imageUrl to use proxy
-    if (parsed.userId && parsed.tokenJpg) {
-      parsed.imageUrl = `/api/proxy/image?userId=${encodeURIComponent(parsed.userId)}&tokenJpg=${encodeURIComponent(parsed.tokenJpg)}`;
+    parsed.authKey = '';
+    delete parsed.tokenJpg;
+    if (parsed.imageUrl?.includes('/api/proxy/image')) {
+      parsed.imageUrl = '';
     }
 
     parsed.persistedAt = Date.now();
@@ -165,7 +155,7 @@ const TTL_MS = {
 };
 
 function ck(name: string, suffix = ''): string {
-  return `zutnik_c_${name}${suffix ? `_${suffix}` : ''}`;
+  return `zutnik_usos_c_${name}${suffix ? `_${suffix}` : ''}`;
 }
 
 function saveC<T>(key: string, data: T): void {

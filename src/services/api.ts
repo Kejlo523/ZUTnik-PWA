@@ -18,11 +18,19 @@ import { getPlanEventFilterKey, getPlanEventFilterLabel } from '../planFilters';
 import { loadOrCreateDeviceId } from './storage';
 
 const API_BASE = import.meta.env.VITE_API_BASE ?? (import.meta.env.DEV ? '/api' : `${import.meta.env.BASE_URL}api`);
-const CARR = [...'23456789abcdefghijkmnopqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ'];
-const CARR2 = [...'vwxyz23456789ABCDEFGHJKkmnopqrstuvwxyzabcdefghijWXYZLMNPQRSTUV'];
 const DEVICE_ID = loadOrCreateDeviceId();
+const SESSION_EXPIRED_MESSAGE = 'Sesja wygasła, zaloguj się ponownie';
+const USOS_LOGIN_SCOPES = 'studies|personal|photo';
 
-type UsosLocalizedValue = string | { pl?: string; en?: string };
+type UsosLocalizedValue = string | number | { pl?: string | number; en?: string | number };
+
+interface UsosUser {
+  id?: string | number;
+  first_name?: string;
+  last_name?: string;
+  student_number?: string | number;
+  photo_urls?: Record<string, string>;
+}
 
 interface UsosProgramme {
   id?: string | number;
@@ -36,64 +44,10 @@ interface UsosProgrammeRow {
   status?: string;
 }
 
-interface UsosCourseEdition {
-  course_id?: string;
-  course_name?: UsosLocalizedValue;
+interface UsosMeResponse {
+  user?: UsosUser;
+  programmes?: UsosProgrammeRow[];
 }
-
-interface UsosCoursesUserResponse {
-  course_editions?: Record<string, UsosCourseEdition[]>;
-  terms?: Array<{ id?: string }>;
-}
-
-interface UsosTermDetails {
-  id?: string;
-  name?: UsosLocalizedValue;
-  is_active?: boolean;
-}
-
-interface UsosGradeEntry {
-  value_symbol?: string | number;
-  date_modified?: string;
-  date_acquisition?: string;
-}
-
-interface UsosCourseGrades {
-  course_grades?: UsosGradeEntry[];
-  course_units_grades?: Record<string, UsosGradeEntry[]>;
-}
-
-interface UsosFaculty {
-  id?: string | number;
-  name?: UsosLocalizedValue;
-}
-
-interface UsosCardRow {
-  id?: string | number;
-  expiration_date?: string;
-  is_active?: boolean;
-}
-
-interface UsosCalendarEventRow {
-  id?: string | number;
-  name?: UsosLocalizedValue;
-  start_date?: string;
-  end_date?: string;
-  type?: string;
-  is_day_off?: boolean;
-}
-
-function firstNonEmpty(...values: unknown[]): string {
-  for (const value of values) {
-    if (typeof value === 'string') {
-      const trimmed = value.trim();
-      if (trimmed) return trimmed;
-    }
-  }
-  return '';
-}
-
-const SESSION_EXPIRED_MESSAGE = 'Sesja wygasła, zaloguj się ponownie';
 
 export class SessionExpiredError extends Error {
   constructor(message = SESSION_EXPIRED_MESSAGE) {
@@ -106,22 +60,23 @@ export function isSessionExpiredError(error: unknown): error is SessionExpiredEr
   return error instanceof SessionExpiredError;
 }
 
-function rethrowIfSessionExpired(error: unknown): void {
-  if (isSessionExpiredError(error)) {
-    throw error;
+function firstNonEmpty(...values: unknown[]): string {
+  for (const value of values) {
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      return String(value);
+    }
+    if (typeof value === 'string') {
+      const trimmed = value.trim();
+      if (trimmed) return trimmed;
+    }
   }
+  return '';
 }
 
-function getMzutStatus(value: unknown): string {
-  if (!value || typeof value !== 'object') return '';
-  const payload = value as Record<string, unknown>;
-  return firstNonEmpty(payload.logInStatus, payload.loginInStatus).toUpperCase();
-}
-
-function hasMzutSessionExpired(value: unknown): boolean {
-  const status = getMzutStatus(value);
-  if (!status || status === 'OK') return false;
-  return status.includes('TOKEN') || status.includes('UNAUTHORIZED') || status.includes('AUTH');
+function ensureArray<T>(value: unknown): T[] {
+  if (Array.isArray(value)) return value as T[];
+  if (value === null || value === undefined) return [];
+  return [value as T];
 }
 
 function hasHttpAuthError(status: number, message: string): boolean {
@@ -131,37 +86,6 @@ function hasHttpAuthError(status: number, message: string): boolean {
     || normalized.includes('forbidden')
     || normalized.includes('oauth_problem=token_rejected')
     || normalized.includes('token rejected');
-}
-
-function ensureArray<T>(value: unknown): T[] {
-  if (Array.isArray(value)) return value as T[];
-  if (value === null || value === undefined) return [];
-  return [value as T];
-}
-
-function normalizeLoginIdentifier(rawLogin: string): string {
-  const trimmed = rawLogin.trim();
-  const at = trimmed.indexOf('@');
-  return at >= 0 ? trimmed.slice(0, at).trim() : trimmed;
-}
-
-function fixImageUrls(html: string): string {
-  return html.replace(/<img([^>]*?)src=["']([^"']+)["']([^>]*?)>/gi, (_match, before, src, after) => {
-    let fixedSrc = src;
-    if (!fixedSrc.startsWith('http') && !fixedSrc.startsWith('data:')) {
-      if (fixedSrc.startsWith('/')) {
-        fixedSrc = `https://www.zut.edu.pl${fixedSrc}`;
-      } else {
-        fixedSrc = `https://www.zut.edu.pl/${fixedSrc}`;
-      }
-    }
-    return `<img${before}src="${fixedSrc}"${after}>`;
-  });
-}
-
-function randomString(length: number, alphabet: string[]): string {
-  const bytes = crypto.getRandomValues(new Uint8Array(length));
-  return [...bytes].map((byte) => alphabet[byte % alphabet.length]).join('');
 }
 
 function createApiRequestInit(init: RequestInit = {}): RequestInit {
@@ -174,53 +98,84 @@ async function apiFetch(input: RequestInfo | URL, init: RequestInit = {}): Promi
   return fetch(input, createApiRequestInit(init));
 }
 
-function generateToken(login: string, password: string): string {
-  const base = randomString(32, CARR);
-  if (!password) return base;
-
-  const now = new Date();
-  const dayOfMonth = now.getDate();
-  const dayOfWeek = now.getDay() + 1;
-  const dayOfWeekInMonth = Math.floor((dayOfMonth - 1) / 7) + 1;
-  const len = `${login}${password}`.length;
-
-  let indexes = [len - 1, len - 5, len - 8, dayOfMonth, dayOfWeek, dayOfWeekInMonth];
-  let alphabet = CARR;
-
-  if (indexes.reduce((acc, n) => acc + n, 0) % 2 === 0) {
-    indexes = [dayOfMonth, len + 3, len + 9, dayOfWeek, len, dayOfWeekInMonth];
-    alphabet = CARR2;
+function extractLocalizedValue(value: UsosLocalizedValue | undefined): string {
+  if (value && typeof value === 'object') {
+    return firstNonEmpty(value.pl, value.en);
   }
-
-  return [...base]
-    .map((ch, index) => {
-      if (indexes.includes(index) && index >= 0 && index <= 32 && index < alphabet.length) {
-        return alphabet[index];
-      }
-      return ch;
-    })
-    .join('');
+  return firstNonEmpty(value);
 }
 
-async function proxyMzut<T = Record<string, unknown>>(fn: string, params: Record<string, string>): Promise<T> {
-  const response = await apiFetch(`${API_BASE}/proxy/mzut`, {
+function extractLocalized<T extends object>(obj: T | null | undefined, key: string): string {
+  if (!obj || typeof obj !== 'object') return '';
+  return extractLocalizedValue((obj as Record<string, UsosLocalizedValue | undefined>)[key]);
+}
+
+function formatStudyMode(value: unknown): string {
+  const mode = Number(value);
+  if (mode === 1) return 'Stacjonarne';
+  if (mode === 2) return 'Niestacjonarne';
+  return '';
+}
+
+function mapUsosStudyStatus(status: string | undefined): string {
+  switch (status) {
+    case 'active': return 'Aktywny';
+    case 'cancelled': return 'Anulowany';
+    case 'graduated_diploma': return 'Absolwent';
+    case 'graduated_end_of_study':
+    case 'graduated_before_diploma':
+      return 'Absolwent (ukończone)';
+    default:
+      return firstNonEmpty(status);
+  }
+}
+
+function fallbackStudy(session: SessionData): Study {
+  return {
+    przynaleznoscId: 'usos-profile',
+    label: session.userId ? `Student ${session.userId}` : 'Dane z USOS',
+  };
+}
+
+function mapUsosStudies(me: UsosMeResponse, session: SessionData): Study[] {
+  const studies = ensureArray<UsosProgrammeRow>(me.programmes)
+    .map((row) => {
+      const programme = row.programme;
+      const id = firstNonEmpty(programme?.id);
+      if (!id) return null;
+
+      const label = extractLocalized(programme, 'description') || id;
+      const mode = formatStudyMode(programme?.mode_of_studies);
+      return {
+        przynaleznoscId: id,
+        label: mode ? `${label} (${mode.toLocaleLowerCase('pl-PL')})` : label,
+      };
+    })
+    .filter((study): study is Study => Boolean(study));
+
+  return studies.length ? studies : [fallbackStudy(session)];
+}
+
+async function fetchUsosMe(usos: UsosSessionData): Promise<UsosMeResponse> {
+  const response = await apiFetch(`${API_BASE}/usos/me`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ fn, params }),
+    body: JSON.stringify({
+      token: usos.accessToken,
+      secret: usos.accessTokenSecret,
+    }),
   });
 
-  const body = (await response.json().catch(() => ({}))) as { data: T; error: string };
-  const errorMessage = body.error || `ZUT proxy HTTP ${response.status}`;
+  const body = (await response.json().catch(() => ({}))) as { error?: string } & UsosMeResponse;
   if (!response.ok) {
+    const errorMessage = body.error || `USOS API error: ${response.status}`;
     if (hasHttpAuthError(response.status, errorMessage)) {
       throw new SessionExpiredError();
     }
     throw new Error(errorMessage);
   }
-  if (hasMzutSessionExpired(body.data)) {
-    throw new SessionExpiredError();
-  }
-  return body.data ?? ({} as T);
+
+  return body;
 }
 
 async function proxyPlanStudent(query: Record<string, string>): Promise<Record<string, unknown>[]> {
@@ -230,7 +185,7 @@ async function proxyPlanStudent(query: Record<string, string>): Promise<Record<s
   }
 
   const response = await apiFetch(`${url.pathname}${url.search}`);
-  const body = (await response.json().catch(() => ({}))) as { data: Record<string, unknown>[]; error: string };
+  const body = (await response.json().catch(() => ({}))) as { data?: Record<string, unknown>[]; error?: string };
   if (!response.ok) {
     throw new Error(body.error || `Plan proxy HTTP ${response.status}`);
   }
@@ -277,165 +232,12 @@ export async function savePlanHiddenSubjects(album: string, hiddenSubjectKeys: s
   return normalizePlanHiddenSubjectKeys(body.hiddenSubjectKeys);
 }
 
-async function proxyRssXml(): Promise<string> {
-  const response = await apiFetch(`${API_BASE}/proxy/rss`);
-  const body = (await response.json().catch(() => ({}))) as { xml: string; error: string };
-  if (!response.ok) {
-    throw new Error(body.error || `RSS proxy HTTP ${response.status}`);
-  }
-  return body.xml || '';
-}
-
-async function proxyUsos<T = unknown>(
-  session: SessionData,
-  endpoint: string,
-  params: Record<string, string> = {},
-): Promise<T> {
-  if (!session.usos) throw new Error('Brak aktywnej sesji USOS.');
-
-  const response = await apiFetch(`${API_BASE}/usos/proxy`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      endpoint,
-      token: session.usos.accessToken,
-      secret: session.usos.accessTokenSecret,
-      params,
-    }),
-  });
-
-  const body = (await response.json().catch(() => ({}))) as { error: string } & T;
-  if (!response.ok) {
-    const errorMessage = body.error || `USOS API error: ${response.status}`;
-    if (hasHttpAuthError(response.status, errorMessage)) {
-      throw new SessionExpiredError();
-    }
-    throw new Error(errorMessage);
-  }
-  return body as T;
-}
-
-function extractLocalized<T extends object>(obj: T | null | undefined, key: string): string {
-  if (!obj || typeof obj !== 'object') return '';
-  const source = obj as Record<string, unknown>;
-  const val = source[key];
-  if (val && typeof val === 'object') {
-    return firstNonEmpty(
-      (val as Record<string, unknown>).pl,
-      (val as Record<string, unknown>).en,
-    );
-  }
-  return String(val ?? '');
-}
-
-function normalizeStudyId(value: unknown): string | null {
-  if (typeof value !== 'string') return null;
-  const trimmed = value.trim();
-  return trimmed || null;
-}
-
-function parseFlexibleDouble(value: unknown): number {
-  if (typeof value === 'number') return Number.isFinite(value) ? value : 0;
-  if (typeof value === 'string') {
-    const parsed = Number.parseFloat(value.trim().replace(',', '.'));
-    return Number.isFinite(parsed) ? parsed : 0;
-  }
-  return 0;
-}
-
-function parseEcts(row: Record<string, unknown>): number {
-  const direct = parseFlexibleDouble(row.ects);
-  if (direct > 0) return direct;
-  for (const key of ['ectsO', 'ECTS', 'punktyEcts', 'punkty_ects', 'punktyEctsO']) {
-    const value = parseFlexibleDouble(row[key]);
-    if (value > 0) return value;
-  }
-  return 0;
-}
-
-function normalizeOptionalText(value: unknown): string | null {
-  if (typeof value === 'number' && Number.isFinite(value)) {
-    return String(value);
-  }
-  const normalized = firstNonEmpty(value);
-  return normalized || null;
-}
-
-function normalizeLegacyFinanceTitle(value: unknown): string {
-  const normalized = normalizeOptionalText(value);
-  if (!normalized) return '';
-  const lowered = normalized.toLocaleLowerCase('pl-PL');
-  return lowered ? `${lowered.charAt(0).toLocaleUpperCase('pl-PL')}${lowered.slice(1)}` : '';
-}
-
-function extractLocalizedOrString(obj: Record<string, unknown>, key: string): string {
-  const localized = obj[key];
-  if (localized && typeof localized === 'object') {
-    return firstNonEmpty(
-      (localized as Record<string, unknown>).pl,
-      (localized as Record<string, unknown>).en,
-    );
-  }
-  return firstNonEmpty(obj[key]);
-}
-
-function formatOutstandingBalance(amountText: string | null): string | null {
-  if (!amountText) return null;
-  return amountText.startsWith('-') ? amountText : `-${amountText}`;
-}
-
-function isUsosPaymentPaid(row: Record<string, unknown>): boolean {
-  const statusValue = row.status;
-  const statusSymbol = statusValue && typeof statusValue === 'object'
-    ? firstNonEmpty((statusValue as Record<string, unknown>).symbol)
-    : firstNonEmpty(statusValue);
-
-  return statusSymbol.toLowerCase() === 'paid'
-    || statusSymbol === '1'
-    || row.is_paid === true;
-}
-
-export async function login(loginValue: string, password: string): Promise<SessionData> {
-  const login = normalizeLoginIdentifier(loginValue);
-  const cleanPassword = password.trim();
-  if (!login || !cleanPassword) {
-    throw new Error('Wpisz login i hasło.');
-  }
-
-  const token = generateToken(login, cleanPassword);
-  const tokenJpg = generateToken(login, '');
-
-  const payload = await proxyMzut<Record<string, unknown>>('getAuthorization', {
-    login,
-    password: cleanPassword,
-    token,
-    tokenJpg,
-  });
-
-  const status = firstNonEmpty(payload.logInStatus, payload.loginInStatus).toUpperCase();
-  if (status !== 'OK') {
-    if (status === 'SYSTEM ERROR') throw new Error('Błąd systemu ZUT.');
-    throw new Error('Niepoprawny login lub hasło.');
-  }
-
-  const userId = firstNonEmpty(payload.login, login);
-  const username = firstNonEmpty(`${firstNonEmpty(payload.pierwszeImie)} ${firstNonEmpty(payload.nazwisko)}`.trim(), userId);
-  const authKey = firstNonEmpty(payload.token, token);
-  const tokenJpgFromApi = firstNonEmpty(payload.tokenJpg, tokenJpg);
-
-  return {
-    userId,
-    username,
-    authKey,
-    imageUrl: `${API_BASE}/proxy/image?userId=${encodeURIComponent(userId)}&tokenJpg=${encodeURIComponent(tokenJpgFromApi)}`,
-    tokenJpg: tokenJpgFromApi,
-    activeStudyId: null,
-  };
+export async function login(): Promise<SessionData> {
+  throw new Error('Logowanie hasłem zostało wyłączone. Użyj logowania przez USOS.');
 }
 
 export async function fetchUsosRequestToken(callbackUrl: string): Promise<{ oauth_token: string; oauth_token_secret: string }> {
-  const scopes = 'studies|grades|personal|photo|email|mobile_numbers|payments|cards';
-  const response = await apiFetch(`${API_BASE}/usos/request-token?callbackUrl=${encodeURIComponent(callbackUrl)}&scopes=${scopes}`);
+  const response = await apiFetch(`${API_BASE}/usos/request-token?callbackUrl=${encodeURIComponent(callbackUrl)}&scopes=${USOS_LOGIN_SCOPES}`);
   const body = await response.json();
   if (!response.ok) throw new Error(body.error || 'Błąd pobierania tokenu USOS.');
   return body;
@@ -459,489 +261,117 @@ export async function loginWithUsos(verifier: string, token: string, secret: str
     accessToken: body.oauth_token,
     accessTokenSecret: body.oauth_token_secret,
   };
-
-  // Once logged into USOS, we still need the legacy ZUT session to fetch the plan (which uses album number).
-  // Strategy: Try to find student in USOS, get their details.
-  const sessionStub: SessionData = {
-    userId: 'usos_user',
-    username: 'Użytkownik USOS',
+  const me = await fetchUsosMe(usos);
+  const user = me.user ?? {};
+  const firstName = firstNonEmpty(user.first_name);
+  const lastName = firstNonEmpty(user.last_name);
+  const rawPhoto = user.photo_urls?.['200x200']
+    || user.photo_urls?.['100x100']
+    || user.photo_urls?.['50x50']
+    || '';
+  const studies = mapUsosStudies(me, {
+    userId: firstNonEmpty(user.student_number, user.id, 'usos_user'),
+    username: '',
     authKey: '',
     imageUrl: '',
     activeStudyId: null,
     usos,
-  };
-
-  const user = await proxyUsos<{ first_name: string; last_name: string; id: string; student_number?: string; photo_urls?: Record<string, string> }>(sessionStub, 'services/users/user', {
-    fields: 'id|first_name|last_name|student_number|photo_urls',
   });
 
-  const rawPhoto = user.photo_urls?.['100x100'] || user.photo_urls?.['50x50'] || '';
-
   return {
-    ...sessionStub,
-    userId: user.student_number || user.id || 'usos_user',
-    username: `${user.first_name} ${user.last_name}`.trim(),
+    userId: firstNonEmpty(user.student_number, user.id, 'usos_user'),
+    username: firstNonEmpty(`${firstName} ${lastName}`.trim(), firstNonEmpty(user.id), 'Użytkownik USOS'),
+    authKey: '',
     imageUrl: rawPhoto ? `${API_BASE}/usos/image?url=${encodeURIComponent(rawPhoto)}` : '',
+    activeStudyId: studies[0]?.przynaleznoscId ?? 'usos-profile',
+    usos,
   };
 }
 
 export async function validateSession(session: SessionData): Promise<void> {
-  const checks: Promise<unknown>[] = [];
-
-  if (session.usos) {
-    checks.push(proxyUsos<{ id?: string }>(session, 'services/users/user', {
-      fields: 'id',
-    }));
+  if (!session.usos?.accessToken || !session.usos.accessTokenSecret) {
+    throw new SessionExpiredError();
   }
-
-  if (!checks.length) {
-    if (!session.authKey) {
-      throw new SessionExpiredError();
-    }
-    return;
-  }
-
-  await Promise.all(checks);
+  await fetchUsosMe(session.usos);
 }
 
 export async function fetchStudies(session: SessionData): Promise<Study[]> {
-  const payload = await proxyMzut<Record<string, unknown>>('getMenuStudent', {
-    login: session.userId,
-    token: session.authKey,
-  });
-
-  return ensureArray<Record<string, unknown>>(payload.Menu)
-    .map((row) => {
-      const przynaleznoscId = normalizeStudyId(row.przynaleznoscId);
-      const nazwa = firstNonEmpty(row.nazwa);
-      const poziom = firstNonEmpty(row.poziom);
-      const label = poziom ? `${nazwa} (${poziom})` : nazwa;
-      return {
-        przynaleznoscId: przynaleznoscId ?? '',
-        label: label || przynaleznoscId || 'Kierunek',
-      };
-    })
-    .filter((study) => study.przynaleznoscId);
-}
-
-export async function fetchSemesters(session: SessionData, studyId: string | null): Promise<Semester[]> {
-  const resolvedStudyId = studyId || session.activeStudyId;
-  if (!resolvedStudyId) return [];
-
-  const payload = await proxyMzut<Record<string, unknown>>('getStudies', {
-    login: session.userId,
-    token: session.authKey,
-    przynaleznoscId: resolvedStudyId,
-    oceny: 'true',
-  });
-
-  return ensureArray<Record<string, unknown>>(payload.Przebieg)
-    .map((row) => ({
-      listaSemestrowId: firstNonEmpty(row.listaSemestrowId),
-      nrSemestru: firstNonEmpty(row.nrSemestru),
-      pora: firstNonEmpty(row.pora),
-      rokAkademicki: firstNonEmpty(row.rokAkademicki),
-      status: firstNonEmpty(row.status, row.statusO),
-    }))
-    .filter((semester) => semester.listaSemestrowId);
-}
-
-export async function fetchGrades(session: SessionData, semesterId: string): Promise<Grade[]> {
-  if (!semesterId) return [];
-  const payload = await proxyMzut<Record<string, unknown>>('getGrade', {
-    login: session.userId,
-    token: session.authKey,
-    listaSemestrowId: semesterId,
-  });
-
-  return ensureArray<Record<string, unknown>>(payload.Ocena).map((row) => {
-    const subject = firstNonEmpty(row.przedmiot, row.przedmiotO);
-    const form = firstNonEmpty(row.formaZajec, row.formaZajecO);
-    const term = firstNonEmpty(row.termin, row.terminO);
-    const date = firstNonEmpty(row.data);
-
-    return {
-      subjectName: subject,
-      grade: firstNonEmpty(row.ocena),
-      weight: parseEcts(row),
-      type: form,
-      teacher: firstNonEmpty(row.pracownik),
-      date: firstNonEmpty(`${term} ${date}`.trim(), date, term),
-    };
-  });
-}
-
-export async function fetchFinance(session: SessionData, studyId: string | null): Promise<FinanceRecord[]> {
-  const resolvedStudyId = studyId || session.activeStudyId;
-  const preferPolishLabels = typeof navigator === 'undefined'
-    ? true
-    : navigator.language.toLowerCase().startsWith('pl');
-
-  if (session.usos) {
-    const payload = await proxyUsos<Array<Record<string, unknown>>>(session, 'services/payments/user_payments');
-
-    return ensureArray<Record<string, unknown>>(payload).map((row) => {
-      const title = firstNonEmpty(
-        extractLocalizedOrString(row, 'name'),
-        extractLocalizedOrString(row, 'title'),
-        row.id,
-      );
-      const amountText = normalizeOptionalText(row.amount);
-      const amountValue = parseFlexibleDouble(amountText);
-      const paid = isUsosPaymentPaid(row);
-
-      return {
-        title,
-        amountText,
-        paidText: paid ? amountText : '0',
-        dueDateText: normalizeOptionalText(row.due_date),
-        paidDateText: null,
-        balanceText: paid ? '0' : formatOutstandingBalance(amountText),
-        accountText: null,
-        amountValue,
-        paidValue: paid ? amountValue : 0,
-        balanceValue: paid ? 0 : -amountValue,
-      };
-    });
-  }
-
-  if (!resolvedStudyId) return [];
-
-  const payload = await proxyMzut<Record<string, unknown>>('getPayment', {
-    login: session.userId,
-    token: session.authKey,
-    przynaleznoscId: resolvedStudyId,
-  });
-
-  return ensureArray<Record<string, unknown>>(payload.Oplata).map((row) => {
-    const amountText = normalizeOptionalText(row.naleznosc);
-    const paidText = normalizeOptionalText(row.wplata);
-    const balanceText = normalizeOptionalText(row.saldo);
-    const titleSource = preferPolishLabels
-      ? firstNonEmpty(row.nazwa, row.nazwaO)
-      : firstNonEmpty(row.nazwaO, row.nazwa);
-
-    return {
-      title: normalizeLegacyFinanceTitle(titleSource),
-      amountText,
-      paidText,
-      dueDateText: normalizeOptionalText(row.dataPlatnosci),
-      paidDateText: normalizeOptionalText(row.dataWplaty),
-      balanceText,
-      accountText: normalizeOptionalText(row.konto),
-      amountValue: parseFlexibleDouble(amountText),
-      paidValue: parseFlexibleDouble(paidText),
-      balanceValue: parseFlexibleDouble(balanceText),
-    };
-  });
+  return fetchCombinedStudies(session);
 }
 
 export async function fetchCombinedStudies(session: SessionData): Promise<Study[]> {
-  if (session.usos) {
-    const payload = await proxyUsos<UsosProgrammeRow[]>(session, 'services/progs/student', {
-      fields: 'programme[id|description|mode_of_studies|level_of_studies]|status',
-      active_only: 'false',
-    });
+  if (!session.usos) return [];
+  const me = await fetchUsosMe(session.usos);
+  return mapUsosStudies(me, session);
+}
 
-    return payload
-      .map((row) => {
-        const prog = row.programme;
-        if (!prog) return null;
-        const id = String(prog.id || '');
-        let label = extractLocalized(prog, 'description') || id;
-        const mode = Number(prog.mode_of_studies);
-        if (mode > 0) label += ` (${mode === 1 ? 'stacj.' : 'niestacj.'})`;
-        return { przynaleznoscId: id, label };
-      })
-      .filter((s): s is Study => Boolean(s?.przynaleznoscId));
-  }
-  return fetchStudies(session);
+export async function fetchSemesters(session: SessionData, studyId: string | null): Promise<Semester[]> {
+  void session;
+  void studyId;
+  return [];
 }
 
 export async function fetchCombinedSemesters(session: SessionData, studyId: string | null): Promise<Semester[]> {
-  if (session.usos) {
-    const ceResp = await proxyUsos<UsosCoursesUserResponse>(session, 'services/courses/user', {
-      active_terms_only: 'false',
-      fields: 'course_editions',
-    });
-
-    const termIds = Object.keys(ceResp.course_editions || {}).sort();
-    if (termIds.length === 0) return [];
-
-    const tDetails = await proxyUsos<Record<string, UsosTermDetails>>(session, 'services/terms/terms', {
-      term_ids: termIds.join('|'),
-      fields: 'id|name|is_active',
-    });
-
-    return termIds.map((tid) => {
-      const tObj = tDetails[tid];
-      return {
-        listaSemestrowId: tid,
-        nrSemestru: tid,
-        pora: tid.endsWith('Z') ? 'Zimowy' : tid.endsWith('L') ? 'Letni' : '',
-        rokAkademicki: tObj ? extractLocalized(tObj, 'name') : tid,
-        status: tObj?.is_active ? 'Aktywny' : 'Zakończony',
-      };
-    });
-  }
   return fetchSemesters(session, studyId);
 }
 
+export async function fetchGrades(session: SessionData, semesterId: string): Promise<Grade[]> {
+  void session;
+  void semesterId;
+  return [];
+}
+
 export async function fetchCombinedGrades(session: SessionData, semesterId: string): Promise<Grade[]> {
-  if (session.usos) {
-    const [courseNamesResp, courseEctsResp, gradesResp] = await Promise.all([
-      proxyUsos<UsosCoursesUserResponse>(session, 'services/courses/user', { active_terms_only: 'false' }),
-      proxyUsos<Record<string, Record<string, unknown>>>(session, 'services/courses/user_ects_points'),
-      proxyUsos<Record<string, Record<string, UsosCourseGrades>>>(session, 'services/grades/terms2', {
-        term_ids: semesterId,
-        fields: 'value_symbol|passes|value_description|counts_into_average|date_modified|date_acquisition|comment',
-      }),
-    ]);
-
-    const namesMap: Record<string, string> = {};
-    const editions = courseNamesResp.course_editions?.[semesterId] || [];
-    for (const c of editions) {
-      if (c.course_id) namesMap[c.course_id] = extractLocalized(c, 'course_name');
-    }
-
-    const ectsMap = courseEctsResp[semesterId] || {};
-    const termData = gradesResp[semesterId] || {};
-    const results: Grade[] = [];
-
-    for (const [courseId, courseData] of Object.entries(termData)) {
-      const name = namesMap[courseId] || courseId;
-      const ects = parseFlexibleDouble(ectsMap[courseId]);
-      let hasAny = false;
-
-      const addUsosGrade = (gObj: UsosGradeEntry | null | undefined, type: string) => {
-        if (!gObj) return;
-        const dateRaw = gObj.date_acquisition || gObj.date_modified || '';
-        results.push({
-          subjectName: name,
-          grade: String(gObj.value_symbol || ''),
-          weight: ects,
-          type,
-          teacher: '',
-          date: dateRaw.split(' ')[0],
-        });
-        hasAny = true;
-      };
-
-      for (const g of courseData.course_grades ?? []) addUsosGrade(g, 'Ocena końcowa');
-      for (const list of Object.values(courseData.course_units_grades ?? {})) {
-        for (const g of list) addUsosGrade(g, 'Zaliczenie');
-      }
-
-      if (!hasAny) {
-        results.push({ subjectName: name, grade: '', weight: ects, type: '', teacher: '', date: '' });
-      }
-    }
-    return results;
-  }
   return fetchGrades(session, semesterId);
+}
+
+export async function fetchFinance(session: SessionData, studyId: string | null): Promise<FinanceRecord[]> {
+  void session;
+  void studyId;
+  return [];
 }
 
 export async function fetchInfo(
   session: SessionData,
   studyId: string | null,
 ): Promise<{ details: StudyDetails | null; history: StudyHistoryItem[]; els?: ElsCard | null; calendarEvents?: CalendarEvent[] }> {
-  const resolvedStudyId = studyId || session.activeStudyId;
-  if (!resolvedStudyId) {
+  if (!session.usos) {
     return { details: null, history: [], els: null, calendarEvents: [] };
   }
 
-  if (session.usos) {
-    try {
-      const details: StudyDetails = {
-        album: session.userId || '',
-        wydzial: '',
-        kierunek: '',
-        forma: '',
-        poziom: '',
-        specjalnosc: '',
-        specjalizacja: '',
-        status: '',
-        rokAkademicki: '',
-        semestrLabel: '',
-      };
-
-      const progs = await proxyUsos<UsosProgrammeRow[]>(session, 'services/progs/student', {
-        fields: 'programme[id|description|mode_of_studies|level_of_studies]|status',
-        active_only: 'false',
-      });
-
-      let targetProg = progs.find(p => String(p.programme?.id) === resolvedStudyId);
-      if (!targetProg && progs.length > 0) targetProg = progs[progs.length - 1];
-
-      let facultyIdStr = '';
-      if (targetProg && targetProg.programme) {
-        const prog = targetProg.programme;
-        const pid = String(prog.id || '');
-
-        details.kierunek = extractLocalized(prog, 'description') || pid;
-
-        try {
-          const facultyObj = await proxyUsos<{ faculty?: UsosFaculty }>(session, 'services/progs/programme', {
-            programme_id: pid,
-            fields: 'faculty[id|name]',
-          });
-          if (facultyObj?.faculty) {
-            details.wydzial = extractLocalized(facultyObj.faculty, 'name');
-            facultyIdStr = String(facultyObj.faculty.id || '');
-          }
-        } catch (e) {
-          rethrowIfSessionExpired(e);
-          // Ignore faculty fetch errors
-        }
-
-        const mode = Number(prog.mode_of_studies);
-        details.forma = mode === 1 ? 'Stacjonarne' : 'Niestacjonarne';
-        details.poziom = extractLocalized(prog, 'level_of_studies');
-
-        const statusRaw = targetProg.status || '';
-        switch (statusRaw) {
-          case "active": details.status = "Aktywny"; break;
-          case "cancelled": details.status = "Anulowany"; break;
-          case "graduated_diploma": details.status = "Absolwent"; break;
-          case "graduated_end_of_study":
-          case "graduated_before_diploma": details.status = "Absolwent (ukończone)"; break;
-          default: details.status = statusRaw;
-        }
-      }
-
-      // Fetch active term for rok/semestr
-      try {
-        const ceResp = await proxyUsos<{ course_editions: Record<string, unknown> }>(session, 'services/courses/user', {
-          active_terms_only: 'true',
-          fields: 'course_editions',
-        });
-        const editions = Object.keys(ceResp.course_editions || {});
-        if (editions.length > 0) {
-          const tid = editions[0];
-          details.semestrLabel = tid.endsWith('Z') ? 'zimowy' : (tid.endsWith('L') ? 'letni' : '');
-          if (tid.length >= 7) {
-            details.rokAkademicki = `${tid.substring(0, 4)}/20${tid.substring(5, 7)}`;
-          } else {
-            details.rokAkademicki = tid.replace(/[ZL]$/, '');
-          }
-        }
-      } catch (e) {
-        rethrowIfSessionExpired(e);
-      }
-
-      // Fetch history terms
-      const historyItems: StudyHistoryItem[] = [];
-      try {
-        const termsResp = await proxyUsos<{ terms: Array<{ id?: string }> }>(session, 'services/courses/user', {
-          fields: 'terms',
-        });
-        if (termsResp.terms) {
-          for (const term of termsResp.terms) {
-            if (term.id) {
-              const pora = term.id.endsWith('Z') ? 'Zimowy' : (term.id.endsWith('L') ? 'Letni' : '');
-              historyItems.push({
-                label: `${term.id} ${pora}`.trim(),
-                status: 'Zaliczone/Aktywne',
-              });
-            }
-          }
-          historyItems.sort((a, b) => b.label.localeCompare(a.label));
-        }
-      } catch (e) {
-        rethrowIfSessionExpired(e);
-      }
-      // Fetch ELS cards
-      let els: ElsCard | null = null;
-      try {
-        const cards = await proxyUsos<UsosCardRow[]>(session, 'services/cards/user', {
-          fields: 'id|expiration_date|is_active',
-        });
-        if (Array.isArray(cards) && cards.length > 0) {
-          const card = cards[0];
-          els = {
-            id: String(card.id),
-            expirationDate: String(card.expiration_date || ''),
-            isActive: !!card.is_active,
-          };
-        }
-      } catch (e) {
-        rethrowIfSessionExpired(e);
-        console.warn("Failed to fetch cards:", e);
-      }
-
-      // Fetch upcoming calendar events (next 30 days)
-      let calendarEvents: CalendarEvent[] = [];
-      try {
-        const today = new Date();
-        const nextMonth = new Date(today);
-        nextMonth.setMonth(today.getMonth() + 1);
-        const formatD = (d: Date) => d.toISOString().split('T')[0];
-
-        const calParams: Record<string, string> = {
-          start_date: formatD(today),
-          end_date: formatD(nextMonth),
-          fields: 'id|name|start_date|end_date|type|is_day_off',
-        };
-        if (facultyIdStr) calParams.faculty_id = facultyIdStr;
-
-        const cals = await proxyUsos<UsosCalendarEventRow[]>(session, 'services/calendar/search', calParams);
-
-        if (Array.isArray(cals)) {
-          calendarEvents = cals.map(c => ({
-            id: String(c.id),
-            name: extractLocalized(c, 'name'),
-            startDate: String(c.start_date || ''),
-            endDate: String(c.end_date || ''),
-            type: String(c.type || ''),
-            isDayOff: !!c.is_day_off,
-          }));
-        }
-      } catch (e) {
-        rethrowIfSessionExpired(e);
-        console.warn("Failed to fetch calendar:", e);
-      }
-
-      return { details, history: historyItems, els, calendarEvents };
-    } catch (e) {
-      rethrowIfSessionExpired(e);
-      console.warn("Failed to fetch info from USOS", e);
-      return { details: null, history: [], els: null, calendarEvents: [] };
-    }
-  }
-
-  const [study, studies] = await Promise.all([
-    proxyMzut<Record<string, unknown>>('getStudy', {
-      login: session.userId,
-      token: session.authKey,
-      przynaleznoscId: resolvedStudyId,
-    }),
-    proxyMzut<Record<string, unknown>>('getStudies', {
-      login: session.userId,
-      token: session.authKey,
-      przynaleznoscId: resolvedStudyId,
-      oceny: 'true',
-    }),
-  ]);
-
+  const me = await fetchUsosMe(session.usos);
+  const programmes = ensureArray<UsosProgrammeRow>(me.programmes);
+  const target = programmes.find((row) => firstNonEmpty(row.programme?.id) === studyId) ?? programmes[0];
+  const programme = target?.programme;
   const details: StudyDetails = {
-    album: firstNonEmpty(study.album),
-    wydzial: firstNonEmpty(study.wydzial, study.wydzialAng),
-    kierunek: firstNonEmpty(study.kierunek, study.kierunekAng),
-    forma: firstNonEmpty(study.forma, study.formaAng),
-    poziom: firstNonEmpty(study.poziom, study.poziomAng),
-    specjalnosc: firstNonEmpty(study.specjalnosc, study.specjalnoscO),
-    specjalizacja: firstNonEmpty(study.specjalizacja, study.specjalizacjaO),
-    status: firstNonEmpty(study.status, study.statusAng),
-    rokAkademicki: firstNonEmpty(study.rokAkademicki),
-    semestrLabel: firstNonEmpty(`${firstNonEmpty(study.nrSemestru)} ${firstNonEmpty(study.pora)}`.trim()),
+    album: session.userId,
+    wydzial: '',
+    kierunek: programme ? extractLocalized(programme, 'description') : '',
+    forma: formatStudyMode(programme?.mode_of_studies),
+    poziom: extractLocalized(programme, 'level_of_studies'),
+    specjalnosc: '',
+    specjalizacja: '',
+    status: mapUsosStudyStatus(target?.status),
+    rokAkademicki: '',
+    semestrLabel: '',
   };
 
-  const history = ensureArray<Record<string, unknown>>(studies.Przebieg).map((row) => ({
-    label: `${firstNonEmpty(row.nrSemestru)} ${firstNonEmpty(row.pora)} - ${firstNonEmpty(row.rokAkademicki)}`.trim(),
-    status: firstNonEmpty(row.status, row.statusO),
-  }));
+  const history = programmes
+    .map((row) => {
+      const label = extractLocalized(row.programme, 'description') || firstNonEmpty(row.programme?.id);
+      if (!label) return null;
+      return {
+        label,
+        status: mapUsosStudyStatus(row.status),
+      };
+    })
+    .filter((item): item is StudyHistoryItem => Boolean(item));
 
   return { details, history, els: null, calendarEvents: [] };
+}
+
+export async function fetchNews(): Promise<NewsItem[]> {
+  return [];
 }
 
 function startOfDay(date: Date): Date {
@@ -1124,7 +554,6 @@ function layoutDayEvents<T extends PlanLayoutEvent>(events: T[]): T[] {
   const sorted = events
     .map((event, index) => ({ event, index }))
     .sort((a, b) => a.event.startMin - b.event.startMin || a.event.endMin - b.event.endMin);
-
   const positioned = events.map((event) => ({ ...event, leftPct: 0, widthPct: 100 }));
 
   let cursor = 0;
@@ -1254,29 +683,12 @@ function buildPlanSubjectFilters(dayColumns: PlanResult['dayColumns']): PlanResu
   return [...subjectFilterMap.values()].sort((a, b) => a.label.localeCompare(b.label, 'pl'));
 }
 
-async function resolvePlanAlbum(session: SessionData, resolvedStudyId: string): Promise<string> {
+function resolvePlanAlbum(session: SessionData): string {
   const directAlbum = firstNonEmpty(session.userId);
   if (/^(s?\d{4,6})$/i.test(directAlbum)) {
     return directAlbum;
   }
-
-  let album = '';
-  if (session.authKey) {
-    try {
-      const study = await proxyMzut<Record<string, unknown>>('getStudy', {
-        login: session.userId,
-        token: session.authKey,
-        przynaleznoscId: resolvedStudyId,
-      });
-      album = firstNonEmpty(study.album);
-    } catch (error) {
-      rethrowIfSessionExpired(error);
-      console.warn('Failed to fetch album from getStudy', error);
-    }
-  }
-
-  if (!album) throw new Error('Brak numeru albumu.');
-  return album;
+  throw new Error('Brak numeru albumu w danych USOS.');
 }
 
 function findPeriodByYear(
@@ -1447,21 +859,7 @@ export async function fetchPlanWindow(
       end: toOffsetIso(new Date(fetchEnd.getFullYear(), fetchEnd.getMonth(), fetchEnd.getDate(), 23, 59, 59)),
     };
   } else {
-    const resolvedStudyId = payload.studyId || session.activeStudyId;
-    if (!resolvedStudyId) {
-      return {
-        rangeStart: formatYmd(fetchStart),
-        rangeEnd: formatYmd(fetchEnd),
-        album: '',
-        events: [],
-        sessionPeriods: [],
-        entriesTotal: 0,
-        daysWithData: [],
-      };
-    }
-
-    album = await resolvePlanAlbum(session, resolvedStudyId);
-
+    album = resolvePlanAlbum(session);
     urlParams = {
       number: album,
       start: toOffsetIso(new Date(fetchStart.getFullYear(), fetchStart.getMonth(), fetchStart.getDate(), 0, 0, 0)),
@@ -1516,12 +914,7 @@ export async function fetchPlanSemesterExport(
       end: toOffsetIso(new Date(rangeEnd.getFullYear(), rangeEnd.getMonth(), rangeEnd.getDate(), 23, 59, 59)),
     };
   } else {
-    const resolvedStudyId = payload.studyId || session.activeStudyId;
-    if (!resolvedStudyId) {
-      throw new Error('Brak aktywnego toku studiów.');
-    }
-
-    album = await resolvePlanAlbum(session, resolvedStudyId);
+    album = resolvePlanAlbum(session);
     urlParams = {
       number: album,
       start: toOffsetIso(new Date(rangeStart.getFullYear(), rangeStart.getMonth(), rangeStart.getDate(), 0, 0, 0)),
@@ -1558,71 +951,7 @@ export async function fetchPlanSemesterExport(
 
 export async function fetchPlanSuggestions(kind: string, query: string): Promise<string[]> {
   const response = await apiFetch(`${API_BASE}/proxy/plan-suggest?kind=${encodeURIComponent(kind)}&query=${encodeURIComponent(query)}`);
-  const body = (await response.json().catch(() => ({}))) as { data: Array<{ item: string }> };
+  const body = (await response.json().catch(() => ({}))) as { data?: Array<{ item: string }> };
   const rows = ensureArray<{ item: string }>(body.data);
   return rows.map((row) => firstNonEmpty(row.item)).filter(Boolean);
-}
-
-export async function fetchNews(): Promise<NewsItem[]> {
-  const xml = await proxyRssXml();
-  if (!xml.trim()) return [];
-
-  const parser = new DOMParser();
-  const doc = parser.parseFromString(xml, 'application/xml');
-  const items = Array.from(doc.querySelectorAll('item'));
-
-  return items.map((item, index) => {
-    const title = firstNonEmpty(item.querySelector('title')?.textContent ?? '');
-    const link = firstNonEmpty(item.querySelector('link')?.textContent ?? '');
-    const pubDateRaw = firstNonEmpty(item.querySelector('pubDate')?.textContent ?? '');
-
-    const descriptionHtml = fixImageUrls(firstNonEmpty(item.querySelector('description')?.textContent ?? ''));
-    const contentNode = item.getElementsByTagName('content:encoded')[0] ?? item.getElementsByTagName('encoded')[0];
-    const contentHtml = fixImageUrls(firstNonEmpty(contentNode?.textContent ?? ''));
-
-    const descriptionText = String(descriptionHtml)
-      .replace(/<[^>]+>/g, ' ')
-      .replace(/&nbsp;/g, ' ')
-      .replace(/&amp;/g, '&')
-      .replace(/&lt;/g, '<')
-      .replace(/&gt;/g, '>')
-      .replace(/&quot;/g, '"')
-      .replace(/&#39;/g, "'")
-      .replace(/\s+/g, ' ')
-      .trim();
-
-    const snippet = descriptionText.length > 220 ? `${descriptionText.slice(0, 217)}...` : descriptionText;
-
-    const imgMatch = contentHtml.match(/<img[^>]+src=["']([^"']+)["'][^>]*>/i);
-    let thumbRaw = imgMatch?.[1] ?? '';
-
-    // Convert relative URLs to absolute for thumbnail
-    if (thumbRaw && !thumbRaw.startsWith('http') && !thumbRaw.startsWith('data:')) {
-      if (thumbRaw.startsWith('/')) {
-        thumbRaw = `https://www.zut.edu.pl${thumbRaw}`;
-      } else {
-        thumbRaw = `https://www.zut.edu.pl/${thumbRaw}`;
-      }
-    }
-
-    const thumbUrl = thumbRaw;
-
-    const parsedDate = new Date(pubDateRaw);
-    const date = Number.isFinite(parsedDate.getTime())
-      ? new Intl.DateTimeFormat('pl-PL', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }).format(parsedDate)
-      : pubDateRaw;
-
-    return {
-      id: index,
-      title,
-      date,
-      pubDateRaw,
-      snippet,
-      link,
-      descriptionHtml,
-      descriptionText,
-      contentHtml,
-      thumbUrl,
-    };
-  });
 }

@@ -295,7 +295,7 @@ export function createStatsService({ storePath, locale = 'pl-PL' }) {
   }
 
   function getRequestDeviceKey(req) {
-    const explicitDeviceId = String(req.headers['x-mzut-device-id'] || '').trim();
+    const explicitDeviceId = String(req.headers['x-zutnik-device-id'] || req.headers['x-mzut-device-id'] || '').trim();
     if (explicitDeviceId) {
       return `device:${crypto.createHash('sha1').update(explicitDeviceId).digest('hex')}`;
     }
@@ -384,7 +384,7 @@ export function createStatsService({ storePath, locale = 'pl-PL' }) {
       : 'Brak danych';
     const methodTotal = Object.values(statsStore.successfulLoginsByMethod).reduce((sum, count) => sum + count, 0);
     const loginMethods = [
-      { key: 'mzut', label: 'mZUT API', count: statsStore.successfulLoginsByMethod.mzut || 0 },
+      { key: 'mzut', label: 'Legacy API', count: statsStore.successfulLoginsByMethod.mzut || 0 },
       { key: 'usos', label: 'USOS OAuth', count: statsStore.successfulLoginsByMethod.usos || 0 },
       { key: 'other', label: 'Inne', count: statsStore.successfulLoginsByMethod.other || 0 },
     ].map((method) => ({

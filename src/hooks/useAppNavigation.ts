@@ -6,8 +6,8 @@ export interface ScreenEntry<TScreen extends string = string, TParams = unknown>
   id: number;
 }
 
-const EXIT_EVENT = 'mzutv2-exit-attempt';
-const LAST_SCREEN_KEY = 'mzutv2_last_screen';
+const EXIT_EVENT = 'zutnik-exit-attempt';
+const LAST_SCREEN_KEY = 'zutnik_last_screen';
 
 interface UseAppNavigationOptions {
   onRootBackAttemptRef?: MutableRefObject<(() => boolean) | null>;
@@ -35,7 +35,7 @@ export function useAppNavigation<TScreen extends string>(
   }, [stack]);
 
   useEffect(() => {
-    const marker = { mzutv2: true, ts: Date.now() };
+    const marker = { zutnik: true, ts: Date.now() };
     window.history.replaceState(marker, '', window.location.href);
     window.history.pushState(marker, '', window.location.href);
 
@@ -46,12 +46,12 @@ export function useAppNavigation<TScreen extends string>(
       }
 
       if (options?.onRootBackAttemptRef?.current?.()) {
-        window.history.pushState({ mzutv2: true, ts: Date.now() }, '', window.location.href);
+        window.history.pushState({ zutnik: true, ts: Date.now() }, '', window.location.href);
         return;
       }
 
       window.dispatchEvent(new CustomEvent(EXIT_EVENT));
-      window.history.pushState({ mzutv2: true, ts: Date.now() }, '', window.location.href);
+      window.history.pushState({ zutnik: true, ts: Date.now() }, '', window.location.href);
     };
 
     window.addEventListener('popstate', onPopState);
@@ -60,15 +60,15 @@ export function useAppNavigation<TScreen extends string>(
 
   const push = useCallback((key: TScreen, params?: unknown) => {
     idRef.current += 1;
-    window.history.pushState({ mzutv2: true, ts: Date.now() }, '', window.location.href);
+    window.history.pushState({ zutnik: true, ts: Date.now() }, '', window.location.href);
     setStack((prev) => [...prev, { key, params, id: idRef.current }]);
   }, []);
 
   const reset = useCallback((key: TScreen, params?: unknown) => {
     idRef.current += 1;
     setStack([{ key, params, id: idRef.current }]);
-    window.history.replaceState({ mzutv2: true, ts: Date.now() }, '', window.location.href);
-    window.history.pushState({ mzutv2: true, ts: Date.now() }, '', window.location.href);
+    window.history.replaceState({ zutnik: true, ts: Date.now() }, '', window.location.href);
+    window.history.pushState({ zutnik: true, ts: Date.now() }, '', window.location.href);
   }, []);
 
   const goBack = useCallback(() => {
@@ -84,9 +84,9 @@ export function useAppNavigation<TScreen extends string>(
       { key: baseScreen, id: baseId },
       { key, params, id: targetId },
     ]);
-    window.history.replaceState({ mzutv2: true, ts: Date.now() }, '', window.location.href);
-    window.history.pushState({ mzutv2: true, ts: Date.now() }, '', window.location.href);
-    window.history.pushState({ mzutv2: true, ts: Date.now() }, '', window.location.href);
+    window.history.replaceState({ zutnik: true, ts: Date.now() }, '', window.location.href);
+    window.history.pushState({ zutnik: true, ts: Date.now() }, '', window.location.href);
+    window.history.pushState({ zutnik: true, ts: Date.now() }, '', window.location.href);
   }, []);
 
   const current = stack[stack.length - 1];

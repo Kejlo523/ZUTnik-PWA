@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img" aria-labelledby="title desc">
+  <title id="title">ZUTnik logo</title>
+  <desc id="desc">A compass-style student assistant mark with a centered yellow dot.</desc>
+  <defs>
+    <linearGradient id="blueGrad" x1="144" y1="396" x2="256" y2="116" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#2c9bf0"/>
+      <stop offset="1" stop-color="#3aa7f5"/>
+    </linearGradient>
+    <linearGradient id="tealGrad" x1="256" y1="116" x2="368" y2="396" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#35c9bf"/>
+      <stop offset="1" stop-color="#31d7bd"/>
+    </linearGradient>
+    <linearGradient id="ringGrad" x1="98" y1="98" x2="414" y2="414" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#30d0c5"/>
+      <stop offset="1" stop-color="#2fd6bd"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="512" height="512" fill="#071216"/>
+  <circle cx="256" cy="256" r="149" fill="none" stroke="url(#ringGrad)" stroke-width="18"/>
+  <circle cx="256" cy="256" r="132" fill="#102b31" opacity="0.88"/>
+
+  <path d="M256 116 L144 396 L256 326 Z" fill="url(#blueGrad)"/>
+  <path d="M256 116 L368 396 L256 326 Z" fill="url(#tealGrad)"/>
+  <path d="M256 326 L176 374 Q256 420 336 374 Z" fill="#071216"/>
+
+  <circle cx="256" cy="306" r="26" fill="#071216"/>
+  <circle cx="256" cy="306" r="21" fill="#ffdb4d"/>
+</svg>

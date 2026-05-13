@@ -29,7 +29,7 @@ function buildFileName(planResult: PlanResult): string {
   ) + 1;
 
   if (rangeDays > 45) {
-    return `mzut-plan-semestr-${planResult.rangeStart}-${planResult.rangeEnd}.ics`;
+    return `zutnik-plan-semestr-${planResult.rangeStart}-${planResult.rangeEnd}.ics`;
   }
 
   const suffix = planResult.viewMode === 'day'
@@ -37,7 +37,7 @@ function buildFileName(planResult: PlanResult): string {
     : planResult.viewMode === 'month'
       ? 'miesiac'
       : 'tydzien';
-  return `mzut-plan-${suffix}-${planResult.currentDate}.ics`;
+  return `zutnik-plan-${suffix}-${planResult.currentDate}.ics`;
 }
 
 export function exportPlanToIcs(planResult: PlanResult): boolean {
@@ -48,10 +48,10 @@ export function exportPlanToIcs(planResult: PlanResult): boolean {
   const lines: string[] = [
     'BEGIN:VCALENDAR',
     'VERSION:2.0',
-    'PRODID:-//mZUT v2 PWA//Plan Export//PL',
+    'PRODID:-//ZUTnik PWA//Plan Export//PL',
     'CALSCALE:GREGORIAN',
     'METHOD:PUBLISH',
-    `X-WR-CALNAME:${escapeIcsText('mZUT v2 - Plan zajęć')}`,
+    `X-WR-CALNAME:${escapeIcsText('ZUTnik - Plan zajęć')}`,
   ];
 
   for (const { date, event } of events) {
@@ -64,7 +64,7 @@ export function exportPlanToIcs(planResult: PlanResult): boolean {
 
     lines.push(
       'BEGIN:VEVENT',
-      `UID:${escapeIcsText(`${date}-${event.startMin}-${event.endMin}-${event.subjectKey || event.title}@mzutv2-pwa`)}`,
+      `UID:${escapeIcsText(`${date}-${event.startMin}-${event.endMin}-${event.subjectKey || event.title}@zutnik-pwa`)}`,
       `DTSTAMP:${generatedAt}`,
       `DTSTART:${formatIcsDateTime(date, event.startStr)}`,
       `DTEND:${formatIcsDateTime(date, event.endStr)}`,

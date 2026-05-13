@@ -208,7 +208,7 @@ function getStatsAuthState(req) {
 }
 
 function sendStatsBasicAuthPrompt(res) {
-  res.set('WWW-Authenticate', 'Basic realm="mZUT v2 stats", charset="UTF-8"');
+  res.set('WWW-Authenticate', 'Basic realm="ZUTnik stats", charset="UTF-8"');
   return res.status(401).type('text/plain').send('Authentication required');
 }
 
@@ -329,7 +329,7 @@ app.post('/api/proxy/mzut', async (req, res) => {
     const params = sanitizeParams(req.body?.params);
 
     if (!fn) {
-      return res.status(400).json({ error: 'Brak poprawnej funkcji mZUT' });
+      return res.status(400).json({ error: 'Brak poprawnej funkcji ZUT' });
     }
 
     const url = `${MZUT_API_BASE}?f=${encodeURIComponent(fn)}`;
@@ -341,14 +341,14 @@ app.post('/api/proxy/mzut', async (req, res) => {
     const response = await fetchWithTimeout(url, {
       method: 'POST',
       headers: {
-        'User-Agent': 'mZUT-PWA-Proxy/1.0',
+        'User-Agent': 'ZUTnik-PWA-Proxy/1.0',
         'Content-Type': 'application/x-www-form-urlencoded; charset=utf-8',
       },
       body,
     });
 
     if (!response.ok) {
-      return res.status(response.status).json({ error: `Upstream mZUT HTTP ${response.status}` });
+      return res.status(response.status).json({ error: `Upstream ZUT HTTP ${response.status}` });
     }
 
     const data = await passthroughJson(response);
@@ -358,7 +358,7 @@ app.post('/api/proxy/mzut', async (req, res) => {
     }
     return res.json({ data });
   } catch (error) {
-    return res.status(502).json({ error: `Proxy mZUT error: ${error.message}` });
+    return res.status(502).json({ error: `Proxy ZUT error: ${error.message}` });
   }
 });
 
@@ -372,7 +372,7 @@ app.get('/api/proxy/plan-student', async (req, res) => {
 
     const url = `${PLAN_STUDENT_BASE}?${query.toString()}`;
     const response = await fetchWithTimeout(url, {
-      headers: { 'User-Agent': 'mZUT-PWA-Proxy/1.0' },
+      headers: { 'User-Agent': 'ZUTnik-PWA-Proxy/1.0' },
     });
 
     if (!response.ok) {
@@ -396,7 +396,7 @@ app.get('/api/proxy/plan-suggest', async (req, res) => {
 
     const url = `${PLAN_SUGGEST_BASE}?kind=${encodeURIComponent(kind)}&query=${encodeURIComponent(query)}`;
     const response = await fetchWithTimeout(url, {
-      headers: { 'User-Agent': 'mZUT-PWA-Proxy/1.0' },
+      headers: { 'User-Agent': 'ZUTnik-PWA-Proxy/1.0' },
     });
 
     if (!response.ok) {
@@ -420,7 +420,7 @@ app.get('/api/proxy/image', async (req, res) => {
 
     const url = `https://www.zut.edu.pl/app-json-proxy/image/?userId=${encodeURIComponent(userId)}&tokenJpg=${encodeURIComponent(tokenJpg)}`;
     const response = await fetchWithTimeout(url, {
-      headers: { 'User-Agent': 'mZUTv2-PWA-Proxy/1.0' },
+      headers: { 'User-Agent': 'ZUTnik-PWA-Proxy/1.0' },
     });
 
     if (!response.ok) {
@@ -453,7 +453,7 @@ app.get('/api/usos/image', async (req, res) => {
     }
 
     const response = await fetchWithTimeout(url, {
-      headers: { 'User-Agent': 'mZUTv2-PWA-Proxy/1.0' },
+      headers: { 'User-Agent': 'ZUTnik-PWA-Proxy/1.0' },
     });
 
     if (!response.ok) {
@@ -500,7 +500,7 @@ app.get('/api/usos/request-token', async (req, res) => {
       method: 'POST',
       headers: {
         'Authorization': authHeader,
-        'User-Agent': 'mZUT-PWA-Proxy/1.0',
+        'User-Agent': 'ZUTnik-PWA-Proxy/1.0',
         'Content-Type': 'application/x-www-form-urlencoded'
       },
       body
@@ -543,7 +543,7 @@ app.post('/api/usos/access-token', async (req, res) => {
       method: 'POST',
       headers: {
         'Authorization': authHeader,
-        'User-Agent': 'mZUT-PWA-Proxy/1.0',
+        'User-Agent': 'ZUTnik-PWA-Proxy/1.0',
         'Content-Type': 'application/x-www-form-urlencoded'
       },
       body
@@ -594,7 +594,7 @@ app.post('/api/usos/proxy', async (req, res) => {
       method: 'GET',
       headers: {
         'Authorization': authHeader,
-        'User-Agent': 'mZUT-PWA-Proxy/1.0'
+        'User-Agent': 'ZUTnik-PWA-Proxy/1.0'
       }
     });
 
@@ -697,7 +697,7 @@ app.get('/api/proxy/calendar', async (_req, res) => {
     for (const url of CALENDAR_URLS) {
       try {
         const response = await fetchWithTimeout(url, {
-          headers: { 'User-Agent': 'mZUT-PWA-Proxy/1.0' },
+          headers: { 'User-Agent': 'ZUTnik-PWA-Proxy/1.0' },
         });
         if (!response.ok) continue;
         const html = await response.text();
@@ -720,7 +720,7 @@ app.get('/api/proxy/calendar', async (_req, res) => {
 app.get('/api/proxy/rss', async (_req, res) => {
   try {
     const response = await fetchWithTimeout(RSS_URL, {
-      headers: { 'User-Agent': 'mZUT-PWA-Proxy/1.0' },
+      headers: { 'User-Agent': 'ZUTnik-PWA-Proxy/1.0' },
     });
 
     if (!response.ok) {
@@ -761,5 +761,5 @@ if (existsSync(distPath)) {
 }
 
 app.listen(port, () => {
-  console.log(`mzut-v2-pwa proxy listening on http://localhost:${port}`);
+  console.log(`ZUTnik proxy listening on http://localhost:${port}`);
 });

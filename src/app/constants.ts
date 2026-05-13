@@ -2,7 +2,7 @@ import type { ScreenKey } from '../types';
 
 const APP_BASE = import.meta.env.BASE_URL;
 
-export const LOGO_SRC = `${APP_BASE}icons/mzutv2-logo.png`;
+export const LOGO_SRC = `${APP_BASE}icons/zutnik-logo.png`;
 
 export const SCREEN_I18N_KEY: Record<ScreenKey, string> = {
   login: 'screen.home',

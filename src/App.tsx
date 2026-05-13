@@ -958,9 +958,9 @@ function App() {
     setPlanSearchOpen(false);
 
     if (shouldReloadPlan) {
-      void loadPlanData();
+      void loadPlanData({ category: planSearchCat, query: '' });
     }
-  }, [loadPlanData, planSearchOpen, planSearchQ]);
+  }, [loadPlanData, planSearchOpen, planSearchQ, planSearchCat]);
 
   useEffect(() => {
     rootBackAttemptRef.current = () => {
@@ -1753,10 +1753,24 @@ function App() {
     const cols = visiblePlanResult?.dayColumns ?? [];
     const weekCols = weekVisibleColumns;
     const today = todayYmd();
-    const activeFilter = [
-      planSearchQ.trim(),
-      hiddenPlanSubjectKeys.length > 0 ? `wykluczono: ${hiddenPlanSubjectKeys.length}` : '',
-    ].filter(Boolean).join(' · ');
+    const hasSearchFilter = !!planSearchQ.trim();
+    const hasExcludedFilter = hiddenPlanSubjectKeys.length > 0;
+    const activeFilterCount = (hasSearchFilter ? 1 : 0) + (hasExcludedFilter ? 1 : 0);
+
+    const handleClearAllFilters = () => {
+      if (hasSearchFilter) {
+        setPlanSearchQ('');
+        setPlanSearchSuggestions([]);
+        setPlanSearchLoading(false);
+        setPlanSearchOpen(false);
+      }
+      if (hasExcludedFilter) {
+        resetPlanSubjectFilters();
+      }
+      if (hasSearchFilter) {
+        void loadPlanData({ category: planSearchCat, query: '' });
+      }
+    };
 
     // Build week grid template with separator columns
     const buildWeekGridTemplate = (numCols: number) => {
@@ -1765,7 +1779,6 @@ function App() {
       for (let i = 0; i < numCols; i++) {
         parts.push('1fr');
         if (i < numCols - 1) {
-          // Check if separator needed between this col and next
           const sep = weekCols.length > i + 1
             ? getWeekSeparatorPeriod(weekCols[i].date, weekCols[i + 1].date, visiblePlanResult?.sessionPeriods ?? [])
             : null;
@@ -1900,7 +1913,7 @@ function App() {
     return (
       <section className="screen plan-screen">
         <aside className="plan-control-pane">
-          {/* Sticky Header — prev | center | Today | search | next */}
+          {/* Sticky Header — prev | center | next */}
           <div className="plan-sticky-header">
             <button type="button" className="plan-nav-btn-compact" onClick={() => {
               const newDate = visiblePlanResult?.prevDate ?? planDate;
@@ -1909,7 +1922,7 @@ function App() {
               <Ic n="chevL" />
             </button>
             <div className="plan-header-center">
-              <div className="plan-date-label-compact">{visiblePlanResult?.headerLabel || planDate}{activeFilter ? ` · ${activeFilter}` : ''}</div>
+              <div className="plan-date-label-compact">{visiblePlanResult?.headerLabel || planDate}</div>
             </div>
             <button type="button" className="plan-nav-btn-compact" onClick={() => {
               const newDate = visiblePlanResult?.nextDate ?? planDate;
@@ -1918,6 +1931,30 @@ function App() {
               <Ic n="chevR" />
             </button>
           </div>
+
+          {/* Active Filters Chip */}
+          {activeFilterCount > 0 && (
+            <div className="plan-active-filters-bar">
+              <button
+                type="button"
+                className="plan-filter-chip"
+                onClick={handleClearAllFilters}
+                title="Wyczyść wszystkie filtry"
+              >
+                <span className="plan-filter-chip-icon"><Ic n="filter" /></span>
+                <span className="plan-filter-chip-label">
+                  {hasSearchFilter && hasExcludedFilter
+                    ? `${planSearchQ.trim()} + ${hiddenPlanSubjectKeys.length} wyklucz.`
+                    : hasSearchFilter
+                      ? planSearchQ.trim()
+                      : `Wykluczono: ${hiddenPlanSubjectKeys.length}`
+                  }
+                </span>
+                <span className="plan-filter-chip-badge">{activeFilterCount}</span>
+                <span className="plan-filter-chip-clear"><Ic n="x" /></span>
+              </button>
+            </div>
+          )}
 
           <div className="plan-floating-toolbar">
             {(['day', 'week', 'month'] as ViewMode[]).map(m => (

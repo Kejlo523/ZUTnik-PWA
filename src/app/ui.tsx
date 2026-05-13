@@ -38,6 +38,8 @@ export function Ic({ n }: { n: string }) {
   if (n === 'location') return <svg viewBox="0 0 24 24" aria-hidden><path {...SV} d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0118 0z" /><circle {...SV} cx="12" cy="10" r="3" /></svg>;
   if (n === 'download') return <svg viewBox="0 0 24 24" aria-hidden><path {...SV} d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" /><polyline {...SV} points="7 10 12 15 17 10" /><line {...SV} x1="12" y1="15" x2="12" y2="3" /></svg>;
   if (n === 'layers') return <svg viewBox="0 0 24 24" aria-hidden><polygon {...SV} points="12 2 2 7 12 12 22 7 12 2" /><polyline {...SV} points="2 17 12 22 22 17" /><polyline {...SV} points="2 12 12 17 22 12" /></svg>;
+  if (n === 'filter') return <svg viewBox="0 0 24 24" aria-hidden><polygon {...SV} points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" /></svg>;
+  if (n === 'x') return <svg viewBox="0 0 24 24" aria-hidden><line {...SV} x1="18" y1="6" x2="6" y2="18" /><line {...SV} x1="6" y1="6" x2="18" y2="18" /></svg>;
   return <svg viewBox="0 0 24 24" aria-hidden><circle cx="12" cy="12" r="4" fill="currentColor" /></svg>;
 }
 

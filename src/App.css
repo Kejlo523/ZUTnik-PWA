@@ -316,6 +316,46 @@ textarea {
   gap: 2px;
 }
 
+.appbar-filter-chip-wrapper {
+  display: flex;
+  align-items: center;
+  margin-right: 6px;
+  animation: filter-chip-in 250ms cubic-bezier(.22, 1, .36, 1);
+}
+
+.appbar-filter-chip {
+  height: 28px; /* Slightly more compact for the appbar */
+  padding: 0 6px 0 8px;
+  max-width: 130px; /* Constrain size in AppBar so it doesn't push title out */
+  gap: 4px;
+}
+
+.appbar-filter-chip .plan-filter-chip-label {
+  font-size: 11px;
+}
+
+.appbar-filter-chip .plan-filter-chip-badge {
+  min-width: 16px;
+  height: 16px;
+  font-size: 9px;
+}
+
+@media (min-width: 1024px) {
+  .appbar-filter-chip {
+    max-width: 200px;
+    height: 32px;
+    padding: 0 8px 0 10px;
+  }
+  .appbar-filter-chip .plan-filter-chip-label {
+    font-size: 12px;
+  }
+  .appbar-filter-chip .plan-filter-chip-badge {
+    min-width: 18px;
+    height: 18px;
+    font-size: 10px;
+  }
+}
+
 .plan-menu-anchor {
   position: relative;
 }

@@ -1753,24 +1753,6 @@ function App() {
     const cols = visiblePlanResult?.dayColumns ?? [];
     const weekCols = weekVisibleColumns;
     const today = todayYmd();
-    const hasSearchFilter = !!planSearchQ.trim();
-    const hasExcludedFilter = hiddenPlanSubjectKeys.length > 0;
-    const activeFilterCount = (hasSearchFilter ? 1 : 0) + (hasExcludedFilter ? 1 : 0);
-
-    const handleClearAllFilters = () => {
-      if (hasSearchFilter) {
-        setPlanSearchQ('');
-        setPlanSearchSuggestions([]);
-        setPlanSearchLoading(false);
-        setPlanSearchOpen(false);
-      }
-      if (hasExcludedFilter) {
-        resetPlanSubjectFilters();
-      }
-      if (hasSearchFilter) {
-        void loadPlanData({ category: planSearchCat, query: '' });
-      }
-    };
 
     // Build week grid template with separator columns
     const buildWeekGridTemplate = (numCols: number) => {
@@ -1931,30 +1913,6 @@ function App() {
               <Ic n="chevR" />
             </button>
           </div>
-
-          {/* Active Filters Chip */}
-          {activeFilterCount > 0 && (
-            <div className="plan-active-filters-bar">
-              <button
-                type="button"
-                className="plan-filter-chip"
-                onClick={handleClearAllFilters}
-                title="Wyczyść wszystkie filtry"
-              >
-                <span className="plan-filter-chip-icon"><Ic n="filter" /></span>
-                <span className="plan-filter-chip-label">
-                  {hasSearchFilter && hasExcludedFilter
-                    ? `${planSearchQ.trim()} + ${hiddenPlanSubjectKeys.length} wyklucz.`
-                    : hasSearchFilter
-                      ? planSearchQ.trim()
-                      : `Wykluczono: ${hiddenPlanSubjectKeys.length}`
-                  }
-                </span>
-                <span className="plan-filter-chip-badge">{activeFilterCount}</span>
-                <span className="plan-filter-chip-clear"><Ic n="x" /></span>
-              </button>
-            </div>
-          )}
 
           <div className="plan-floating-toolbar">
             {(['day', 'week', 'month'] as ViewMode[]).map(m => (
@@ -2466,6 +2424,25 @@ function App() {
       actions.push({ key: 'refresh', icon: 'refresh', label: t('plan.refresh'), onClick: () => void loadNewsData(true), active: false });
     }
 
+    const hasSearchFilter = screen === 'plan' && !!planSearchQ.trim();
+    const hasExcludedFilter = screen === 'plan' && hiddenPlanSubjectKeys.length > 0;
+    const activeFilterCount = (hasSearchFilter ? 1 : 0) + hiddenPlanSubjectKeys.length;
+
+    const handleClearAllFilters = () => {
+      if (hasSearchFilter) {
+        setPlanSearchQ('');
+        setPlanSearchSuggestions([]);
+        setPlanSearchLoading(false);
+        setPlanSearchOpen(false);
+      }
+      if (hasExcludedFilter) {
+        resetPlanSubjectFilters();
+      }
+      if (hasSearchFilter) {
+        void loadPlanData({ category: planSearchCat, query: '' });
+      }
+    };
+
     return (
       <div className={`appbar-actions${screen === 'plan' ? ' plan-appbar-actions' : ''}`}>
         {screen === 'grades' && (
@@ -2481,6 +2458,25 @@ function App() {
             </button>
           </div>
         )}
+        
+        {screen === 'plan' && activeFilterCount > 0 && (
+          <div className="appbar-filter-chip-wrapper">
+            <button
+              type="button"
+              className="plan-filter-chip appbar-filter-chip"
+              onClick={handleClearAllFilters}
+              title="Wyczyść wszystkie filtry"
+            >
+              <span className="plan-filter-chip-icon"><Ic n="filter" /></span>
+              {hasSearchFilter && (
+                <span className="plan-filter-chip-label">{planSearchQ.trim()}</span>
+              )}
+              <span className="plan-filter-chip-badge">{activeFilterCount}</span>
+              <span className="plan-filter-chip-clear"><Ic n="x" /></span>
+            </button>
+          </div>
+        )}
+
         {actions.map(a => (
           <button key={a.key} type="button" className={`icon-btn ${a.active ? 'active' : ''}`} onClick={a.onClick} aria-label={a.label} title={a.label}>
             <Ic n={a.icon} />

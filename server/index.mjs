@@ -15,6 +15,20 @@ import rateLimit from 'express-rate-limit';
 import { Agent } from 'undici';
 import { createStatsService } from './stats/service.mjs';
 import { renderStatsPage } from './stats/page.mjs';
+import {
+  REQUIRED_USOS_SCOPES,
+  asArray,
+  firstNonEmpty,
+  mapFinanceRecords,
+  mapGrades,
+  mapInfoPayload,
+  mapNewsItems,
+  mapSemesters,
+  mapStudentProgramme,
+  mapUserProfile,
+  missingRequiredScopes,
+  normalizeScopeList,
+} from './usos/mappers.mjs';
 
 const app = express();
 const port = Number(process.env.PORT || 8787);
@@ -25,6 +39,9 @@ const USOS_BASE_URL = (process.env.USOS_BASE_URL || 'https://usosapi.zut.edu.pl/
 
 const PLAN_STUDENT_BASE = 'https://plan.zut.edu.pl/schedule_student.php';
 const PLAN_SUGGEST_BASE = 'https://plan.zut.edu.pl/schedule.php';
+const RSS_URL = 'https://www.zut.edu.pl/rssfeed-studenci';
+const USOS_LOGIN_SCOPES = REQUIRED_USOS_SCOPES.join('|');
+const USOS_TOKEN_TTL_MS = 2 * 60 * 60 * 1000;
 const REQUEST_TIMEOUT_MS = 20_000;
 const APP_BASE_PATH = (() => {
   const raw = String(process.env.VITE_APP_BASE || '/v2').trim();
@@ -354,42 +371,263 @@ app.get('/api/proxy/plan-suggest', async (req, res) => {
   }
 });
 
-app.get('/api/usos/image', async (req, res) => {
-  try {
-    const url = String(req.query.url ?? '').trim();
-    if (!url || !url.includes('zut.edu.pl')) {
-      return res.status(400).json({ error: 'Invalid USOS image URL' });
-    }
-
-    const response = await fetchWithTimeout(url, {
-      headers: { 'User-Agent': 'ZUTnik-PWA-Proxy/1.0' },
-    });
-
-    if (!response.ok) {
-      return res.status(response.status).end();
-    }
-
-    const buffer = Buffer.from(await response.arrayBuffer());
-    if (buffer.length === 0) {
-      return res.status(404).end();
-    }
-
-    let contentType = 'image/jpeg';
-    if (buffer[0] === 0x89 && buffer[1] === 0x50) contentType = 'image/png';
-    else if (buffer[0] === 0x47 && buffer[1] === 0x49) contentType = 'image/gif';
-    res.set('Content-Type', contentType);
-    res.set('Cache-Control', 'public, max-age=86400');
-    return res.send(buffer);
-  } catch (error) {
-    return res.status(502).end();
-  }
-});
-
 // ── USOS API Endpoints ──────────────────────────────────────────────────────
+
+function assertUsosConfigured() {
+  if (!USOS_CONSUMER_KEY || !USOS_CONSUMER_SECRET) {
+    const error = new Error('Brak konfiguracji USOS_CONSUMER_KEY/USOS_CONSUMER_SECRET.');
+    error.status = 500;
+    throw error;
+  }
+}
+
+function getUsosCredentials(req) {
+  const token = firstNonEmpty(req.body?.token);
+  const secret = firstNonEmpty(req.body?.secret);
+  if (!token || !secret) {
+    const error = new Error('Missing USOS credentials');
+    error.status = 400;
+    throw error;
+  }
+  return { token, secret };
+}
+
+function cleanQueryParams(params = {}) {
+  const cleanParams = {};
+  for (const [key, value] of Object.entries(params)) {
+    if (value === undefined || value === null) continue;
+    if (Array.isArray(value)) {
+      cleanParams[key] = value.map((item) => String(item ?? '')).join('|');
+    } else {
+      cleanParams[key] = String(value);
+    }
+  }
+  return cleanParams;
+}
+
+function sendUsosError(res, error) {
+  const status = Number(error?.status) || 500;
+  return res.status(status).json({ error: error?.message || 'USOS API error' });
+}
+
+async function fetchUsosJson(endpoint, {
+  token = '',
+  secret = '',
+  tokenMode = 'required',
+  params = {},
+} = {}) {
+  assertUsosConfigured();
+
+  if (tokenMode === 'required' && (!token || !secret)) {
+    const error = new Error('Missing USOS credentials');
+    error.status = 400;
+    throw error;
+  }
+
+  const normalizedEndpoint = endpoint.startsWith('/') ? endpoint.slice(1) : endpoint;
+  const baseUrl = `${USOS_BASE_URL}${normalizedEndpoint}`;
+  const oauthParams = {
+    ...baseOAuthParams(),
+  };
+
+  const shouldUseToken = tokenMode !== 'none' && token;
+  if (shouldUseToken) {
+    oauthParams.oauth_token = token;
+  }
+
+  const cleanParams = cleanQueryParams(params);
+  const sig = signOAuth1('GET', baseUrl, { ...oauthParams, ...cleanParams }, USOS_CONSUMER_SECRET, shouldUseToken ? secret : '');
+  const authHeader = getAuthHeader(oauthParams, sig);
+  const query = new URLSearchParams(cleanParams).toString();
+  const fullUrl = query ? `${baseUrl}?${query}` : baseUrl;
+
+  const response = await fetchWithTimeout(fullUrl, {
+    method: 'GET',
+    headers: {
+      'Authorization': authHeader,
+      'User-Agent': 'ZUTnik-PWA-Proxy/1.0',
+    },
+  });
+
+  const body = await response.text();
+  if (!response.ok) {
+    const error = new Error(`USOS API error: ${body || response.statusText}`);
+    error.status = response.status;
+    throw error;
+  }
+
+  if (!body.trim()) return null;
+  try {
+    return JSON.parse(body);
+  } catch {
+    const error = new Error('Niepoprawny JSON z USOS API.');
+    error.status = 502;
+    throw error;
+  }
+}
+
+async function fetchUsosTokenScopes(token, secret) {
+  const response = await fetchUsosJson('services/apisrv/consumer', {
+    token,
+    secret,
+    tokenMode: 'required',
+    params: { fields: 'token_scopes' },
+  });
+  return normalizeScopeList(response?.token_scopes);
+}
+
+const USER_FIELDS = 'id|first_name|last_name|student_number|student_status';
+const USER_FIELDS_WITH_PHOTO = `${USER_FIELDS}|photo_urls`;
+const PROGRAMME_FIELDS = [
+  'id',
+  'programme[id|name|description|faculty[id|name]|mode_of_studies|level_of_studies|level]',
+  'status',
+  'admission_date',
+  'is_primary',
+  'stages[id|name]',
+].join('|');
+const PROGRAMME_FALLBACK_FIELDS = 'id|programme[id|name|description|mode_of_studies|level_of_studies|level]|status|admission_date|is_primary|stages[id|name]';
+const PROGRAMME_MIN_FIELDS = 'id|programme|status|admission_date|is_primary|stages';
+const COURSE_FIELDS = 'course_editions[course_id|course_name|term_id]|terms';
+const COURSE_WITH_GRADES_FIELDS = 'course_editions[course_id|course_name|term_id|grades[value_symbol|passes|value_description|exam_id|exam_session_number|date_modified|date_acquisition]]|terms';
+const GRADE_FIELDS = 'value_symbol|passes|value_description|exam_id|exam_session_number|date_modified|date_acquisition|counts_into_average|grade_type_id';
+const PAYMENT_FIELDS = 'id|saldo_amount|description|state|account_number|payment_deadline|total_amount|currency|debt_type|type|faculty';
+const CALENDAR_FIELDS = 'id|name|start_date|end_date|type|is_day_off';
+const NEWS_FIELDS = 'items[article[id|publication_date|title|headline_html|content_html|image_urls[720x405|360x203|original]]]|next_page|total';
+
+async function fetchStudentProgrammesRaw(token, secret) {
+  const baseParams = {
+    active_only: 'false',
+    old_programs: 'false',
+  };
+
+  for (const fields of [PROGRAMME_FIELDS, PROGRAMME_FALLBACK_FIELDS, PROGRAMME_MIN_FIELDS]) {
+    try {
+      const programmes = await fetchUsosJson('services/progs/student', {
+        token,
+        secret,
+        tokenMode: 'required',
+        params: {
+          ...baseParams,
+          fields,
+        },
+      });
+      return asArray(programmes);
+    } catch {
+      // Try a simpler selector. Some USOS installations reject subfields here.
+    }
+  }
+
+  return [];
+}
+
+async function fetchUsosUserAndProgrammes(token, secret, scopes = []) {
+  const [user, programmesRaw] = await Promise.all([
+    fetchUsosJson('services/users/user', {
+      token,
+      secret,
+      tokenMode: 'required',
+      params: { fields: USER_FIELDS },
+    }),
+    fetchStudentProgrammesRaw(token, secret),
+  ]);
+
+  return mapUserProfile(user, asArray(programmesRaw), scopes);
+}
+
+function getCourseIdsForTerm(coursesResponse, termId) {
+  const editions = coursesResponse?.course_editions?.[termId] ?? [];
+  return [...new Set(asArray(editions)
+    .map((edition) => firstNonEmpty(edition?.course?.id, edition?.course_id, edition?.id))
+    .filter(Boolean))];
+}
+
+function countGradesForTerm(gradesResponse, termId) {
+  const termGrades = gradesResponse?.[termId] && typeof gradesResponse[termId] === 'object' ? gradesResponse[termId] : {};
+  let count = 0;
+
+  for (const courseGradeData of Object.values(termGrades)) {
+    if (!courseGradeData || typeof courseGradeData !== 'object') continue;
+    count += asArray(courseGradeData.course_grades).filter(Boolean).length;
+    const unitGrades = courseGradeData.course_units_grades && typeof courseGradeData.course_units_grades === 'object'
+      ? courseGradeData.course_units_grades
+      : {};
+    for (const entries of Object.values(unitGrades)) {
+      count += asArray(entries).filter(Boolean).length;
+    }
+  }
+
+  return count;
+}
+
+async function fetchCourseEditionGradesByCourse(token, secret, termId, courseIds) {
+  const pairs = await Promise.all(courseIds.map(async (courseId) => {
+    try {
+      const data = await fetchUsosJson('services/grades/course_edition2', {
+        token,
+        secret,
+        tokenMode: 'required',
+        params: {
+          course_id: courseId,
+          term_id: termId,
+          fields: GRADE_FIELDS,
+        },
+      });
+      return [courseId, data];
+    } catch {
+      return [courseId, null];
+    }
+  }));
+
+  return {
+    [termId]: Object.fromEntries(pairs.filter(([, data]) => data)),
+  };
+}
+
+function addDaysIso(days) {
+  const date = new Date();
+  date.setDate(date.getDate() + days);
+  return date.toISOString().slice(0, 10);
+}
+
+function pickSelectedProgramme(programmes, studyId) {
+  const normalizedId = firstNonEmpty(studyId);
+  const mapped = asArray(programmes);
+  return mapped.find((programme) => programme.studentProgrammeId === normalizedId)
+    || mapped.find((programme) => programme.programmeId === normalizedId)
+    || mapped[0]
+    || null;
+}
+
+function pickPhotoUrl(photoUrls) {
+  const urls = photoUrls && typeof photoUrls === 'object' ? photoUrls : {};
+  return firstNonEmpty(urls['200x200'], urls['100x100'], urls['50x50'], urls.original);
+}
+
+function normalizeUsosAssetUrl(rawUrl) {
+  const raw = firstNonEmpty(rawUrl);
+  if (!raw) return '';
+
+  try {
+    const url = new URL(raw, USOS_BASE_URL);
+    const host = url.hostname.toLowerCase();
+    if (host === 'zut.edu.pl' || host.endsWith('.zut.edu.pl')) {
+      return url.href;
+    }
+  } catch {
+    return '';
+  }
+  return '';
+}
 
 app.get('/api/usos/request-token', async (req, res) => {
   try {
-    const scopes = String(req.query.scopes || 'studies|personal|photo');
+    assertUsosConfigured();
+    const requestedScopes = normalizeScopeList(req.query.scopes);
+    const unknownScopes = requestedScopes.filter((scope) => !REQUIRED_USOS_SCOPES.includes(scope));
+    const scopes = unknownScopes.length || missingRequiredScopes(requestedScopes).length
+      ? USOS_LOGIN_SCOPES
+      : requestedScopes.join('|') || USOS_LOGIN_SCOPES;
     const callbackUrl = String(req.query.callbackUrl || '');
 
     const url = `${USOS_BASE_URL}services/oauth/request_token`;
@@ -421,15 +659,15 @@ app.get('/api/usos/request-token', async (req, res) => {
     }
 
     const result = Object.fromEntries(new URLSearchParams(text));
-    statsService.recordSuccessfulLogin(req, 'usos');
     return res.json(result);
   } catch (error) {
-    return res.status(500).json({ error: error.message });
+    return sendUsosError(res, error);
   }
 });
 
 app.post('/api/usos/access-token', async (req, res) => {
   try {
+    assertUsosConfigured();
     const { oauth_token, oauth_token_secret, oauth_verifier } = req.body;
     if (!oauth_token || !oauth_token_secret || !oauth_verifier) {
       return res.status(400).json({ error: 'Missing parameters' });
@@ -464,75 +702,261 @@ app.post('/api/usos/access-token', async (req, res) => {
     }
 
     const result = Object.fromEntries(new URLSearchParams(text));
-    return res.json(result);
+    const scopes = await fetchUsosTokenScopes(result.oauth_token, result.oauth_token_secret);
+    const missingScopes = missingRequiredScopes(scopes);
+    if (missingScopes.length > 0) {
+      return res.status(403).json({
+        error: `Brakuje wymaganych uprawnień USOS: ${missingScopes.join(', ')}.`,
+        scopes,
+        missingScopes,
+      });
+    }
+
+    const authorizedAt = Date.now();
+    statsService.recordSuccessfulLogin(req, 'usos');
+    return res.json({
+      ...result,
+      scopes,
+      authorizedAt,
+      expiresAt: authorizedAt + USOS_TOKEN_TTL_MS,
+    });
   } catch (error) {
-    return res.status(500).json({ error: error.message });
+    return sendUsosError(res, error);
   }
 });
 
-async function fetchUsosJson(endpoint, token, secret, params = {}) {
-  const baseUrl = `${USOS_BASE_URL}${endpoint.startsWith('/') ? endpoint.slice(1) : endpoint}`;
-  const oauthParams = {
-    ...baseOAuthParams(),
-    oauth_token: token,
-  };
-
-  const cleanParams = {};
-  for (const [key, value] of Object.entries(params)) {
-    cleanParams[key] = String(value ?? '');
-  }
-
-  const sig = signOAuth1('GET', baseUrl, { ...oauthParams, ...cleanParams }, USOS_CONSUMER_SECRET, secret);
-  const authHeader = getAuthHeader(oauthParams, sig);
-
-  let fullUrl = baseUrl;
-  if (Object.keys(cleanParams).length > 0) {
-    fullUrl += `?${new URLSearchParams(cleanParams).toString()}`;
-  }
-
-  const response = await fetchWithTimeout(fullUrl, {
-    method: 'GET',
-    headers: {
-      'Authorization': authHeader,
-      'User-Agent': 'ZUTnik-PWA-Proxy/1.0',
-    },
-  });
-
-  const body = await response.text();
-  if (!response.ok) {
-    const error = new Error(`USOS API error: ${body}`);
-    error.status = response.status;
-    throw error;
-  }
-
-  return body.trim() ? JSON.parse(body) : null;
-}
-
 app.post('/api/usos/me', async (req, res) => {
   try {
-    const { token, secret } = req.body ?? {};
-    if (!token || !secret) {
-      return res.status(400).json({ error: 'Missing USOS credentials' });
+    const { token, secret } = getUsosCredentials(req);
+    const scopes = await fetchUsosTokenScopes(token, secret);
+    const profile = await fetchUsosUserAndProgrammes(token, secret, scopes);
+    return res.json(profile);
+  } catch (error) {
+    return sendUsosError(res, error);
+  }
+});
+
+app.post('/api/usos/semesters', async (req, res) => {
+  try {
+    const { token, secret } = getUsosCredentials(req);
+    const coursesResponse = await fetchUsosJson('services/courses/user', {
+      token,
+      secret,
+      tokenMode: 'required',
+      params: {
+        fields: COURSE_FIELDS,
+        active_terms_only: 'false',
+      },
+    });
+    return res.json({ semesters: mapSemesters(coursesResponse) });
+  } catch (error) {
+    return sendUsosError(res, error);
+  }
+});
+
+app.post('/api/usos/grades', async (req, res) => {
+  try {
+    const { token, secret } = getUsosCredentials(req);
+    const termId = firstNonEmpty(req.body?.termId);
+    if (!termId) {
+      return res.status(400).json({ error: 'Missing termId' });
     }
 
-    const user = await fetchUsosJson('services/users/user', token, secret, {
-      fields: 'id|first_name|last_name|student_number|photo_urls',
+    const coursesResponse = await fetchUsosJson('services/courses/user', {
+      token,
+      secret,
+      tokenMode: 'required',
+      params: {
+        fields: COURSE_WITH_GRADES_FIELDS,
+        active_terms_only: 'false',
+      },
+    }).catch(() => fetchUsosJson('services/courses/user', {
+        token,
+        secret,
+        tokenMode: 'required',
+        params: {
+          fields: COURSE_FIELDS,
+          active_terms_only: 'false',
+        },
+      }));
+    const courseIds = getCourseIdsForTerm(coursesResponse, termId);
+    const [ectsResponse, gradesTermsResponse] = await Promise.all([
+      fetchUsosJson('services/courses/user_ects_points', {
+        token,
+        secret,
+        tokenMode: 'required',
+      }).catch(() => ({})),
+      fetchUsosJson('services/grades/terms2', {
+        token,
+        secret,
+        tokenMode: 'required',
+        params: {
+          term_ids: termId,
+          ...(courseIds.length ? { course_ids: courseIds.join('|') } : {}),
+          fields: GRADE_FIELDS,
+        },
+      }),
+    ]);
+    const gradesResponse = countGradesForTerm(gradesTermsResponse, termId) > 0 || courseIds.length === 0
+      ? gradesTermsResponse
+      : await fetchCourseEditionGradesByCourse(token, secret, termId, courseIds);
+
+    return res.json({
+      grades: mapGrades({ termId, coursesResponse, ectsResponse, gradesResponse }),
+    });
+  } catch (error) {
+    return sendUsosError(res, error);
+  }
+});
+
+app.post('/api/usos/finance', async (req, res) => {
+  try {
+    const { token, secret } = getUsosCredentials(req);
+    const payments = await fetchUsosJson('services/payments/user_payments', {
+      token,
+      secret,
+      tokenMode: 'required',
+      params: { fields: PAYMENT_FIELDS },
+    });
+    return res.json({ records: mapFinanceRecords(payments) });
+  } catch (error) {
+    return sendUsosError(res, error);
+  }
+});
+
+app.post('/api/usos/info', async (req, res) => {
+  try {
+    const { token, secret } = getUsosCredentials(req);
+    const scopes = normalizeScopeList(req.body?.scopes);
+    const profile = await fetchUsosUserAndProgrammes(token, secret, scopes);
+    const selectedProgramme = pickSelectedProgramme(profile.programmes, req.body?.studyId);
+
+    let detailedProgramme = selectedProgramme;
+    if (selectedProgramme?.studentProgrammeId) {
+      const rawProgramme = await fetchUsosJson('services/progs/student_programme', {
+        token,
+        secret,
+        tokenMode: 'required',
+        params: {
+          student_programme_id: selectedProgramme.studentProgrammeId,
+          fields: PROGRAMME_FIELDS,
+        },
+      }).catch(() => null);
+      if (rawProgramme) {
+        detailedProgramme = mapStudentProgramme(rawProgramme);
+      }
+    }
+
+    const [cards, activeCourses] = await Promise.all([
+      fetchUsosJson('services/cards/user', {
+        token,
+        secret,
+        tokenMode: 'required',
+      }).catch(() => []),
+      fetchUsosJson('services/courses/user', {
+        token,
+        secret,
+        tokenMode: 'required',
+        params: {
+          fields: 'terms',
+          active_terms_only: 'true',
+        },
+      }).catch(() => null),
+    ]);
+
+    const facultyId = firstNonEmpty(detailedProgramme?.facultyId);
+    const activeTerm = asArray(activeCourses?.terms)[0] ?? null;
+    const calendarEvents = facultyId
+      ? await fetchUsosJson('services/calendar/search', {
+          token,
+          secret,
+          tokenMode: 'optional',
+          params: {
+            faculty_id: facultyId,
+            start_date: addDaysIso(0),
+            end_date: addDaysIso(30),
+            fields: CALENDAR_FIELDS,
+          },
+        }).catch(() => [])
+      : [];
+
+    return res.json(mapInfoPayload({
+      user: profile.user,
+      selectedProgramme: detailedProgramme,
+      programmes: profile.programmes,
+      cards,
+      calendarEvents,
+      activeTerm,
+    }));
+  } catch (error) {
+    return sendUsosError(res, error);
+  }
+});
+
+app.post('/api/usos/photo', async (req, res) => {
+  try {
+    const { token, secret } = getUsosCredentials(req);
+    const user = await fetchUsosJson('services/users/user', {
+      token,
+      secret,
+      tokenMode: 'required',
+      params: { fields: USER_FIELDS_WITH_PHOTO },
     });
 
-    let programmes = [];
-    try {
-      programmes = await fetchUsosJson('services/progs/student', token, secret, {
-        fields: 'programme[id|description|mode_of_studies|level_of_studies]|status',
-        active_only: 'false',
-      });
-      if (!Array.isArray(programmes)) programmes = [];
-    } catch {
-      programmes = [];
+    const photoUrl = normalizeUsosAssetUrl(pickPhotoUrl(user?.photo_urls));
+    if (!photoUrl) {
+      return res.status(404).json({ error: 'Brak zdjęcia w USOS.' });
     }
 
-    return res.json({ user, programmes });
+    const response = await fetchWithTimeout(photoUrl, {
+      headers: { 'User-Agent': 'ZUTnik-PWA-Proxy/1.0' },
+    });
+    if (!response.ok) {
+      return res.status(response.status).end();
+    }
+
+    const buffer = Buffer.from(await response.arrayBuffer());
+    if (buffer.length === 0) {
+      return res.status(404).end();
+    }
+
+    res.set('Content-Type', response.headers.get('content-type') || 'image/jpeg');
+    res.set('Cache-Control', response.headers.get('cache-control') || 'private, max-age=300');
+    return res.send(buffer);
   } catch (error) {
-    return res.status(error.status || 500).json({ error: error.message });
+    return sendUsosError(res, error);
+  }
+});
+
+app.get('/api/usos/news', async (_req, res) => {
+  try {
+    const newsResponse = await fetchUsosJson('services/news/search', {
+      tokenMode: 'none',
+      params: {
+        num: '30',
+        fields: NEWS_FIELDS,
+      },
+    });
+    return res.json({ items: mapNewsItems(newsResponse) });
+  } catch (error) {
+    return sendUsosError(res, error);
+  }
+});
+
+app.get('/api/proxy/rss', async (_req, res) => {
+  try {
+    const response = await fetchWithTimeout(RSS_URL, {
+      headers: { 'User-Agent': 'ZUTnik-PWA-Proxy/1.0' },
+    });
+
+    if (!response.ok) {
+      return res.status(response.status).json({ error: `Upstream RSS HTTP ${response.status}` });
+    }
+
+    const xml = await response.text();
+    return res.json({ xml });
+  } catch (error) {
+    return res.status(502).json({ error: `Proxy RSS error: ${error.message}` });
   }
 });
 

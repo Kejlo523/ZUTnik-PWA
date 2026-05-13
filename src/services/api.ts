@@ -20,33 +20,35 @@ import { loadOrCreateDeviceId } from './storage';
 const API_BASE = import.meta.env.VITE_API_BASE ?? (import.meta.env.DEV ? '/api' : `${import.meta.env.BASE_URL}api`);
 const DEVICE_ID = loadOrCreateDeviceId();
 const SESSION_EXPIRED_MESSAGE = 'Sesja wygasła, zaloguj się ponownie';
-const USOS_LOGIN_SCOPES = 'studies|personal|photo';
+const USOS_LOGIN_SCOPES = 'studies|grades|payments|cards|photo';
 
-type UsosLocalizedValue = string | number | { pl?: string | number; en?: string | number };
-
-interface UsosUser {
+interface UsosProfileUser {
   id?: string | number;
-  first_name?: string;
-  last_name?: string;
-  student_number?: string | number;
-  photo_urls?: Record<string, string>;
+  firstName?: string;
+  lastName?: string;
+  name?: string;
+  studentNumber?: string | number;
+  studentStatus?: unknown;
 }
 
-interface UsosProgramme {
-  id?: string | number;
-  description?: UsosLocalizedValue;
-  mode_of_studies?: string | number;
-  level_of_studies?: UsosLocalizedValue;
-}
-
-interface UsosProgrammeRow {
-  programme?: UsosProgramme | null;
+interface UsosProfileProgramme {
+  studentProgrammeId?: string | number;
+  programmeId?: string | number;
+  name?: string;
+  facultyId?: string | number;
+  facultyName?: string;
+  mode?: string;
+  level?: string;
   status?: string;
+  statusLabel?: string;
+  admissionDate?: string;
+  isPrimary?: boolean;
 }
 
 interface UsosMeResponse {
-  user?: UsosUser;
-  programmes?: UsosProgrammeRow[];
+  user?: UsosProfileUser;
+  programmes?: UsosProfileProgramme[];
+  scopes?: string[];
 }
 
 export class SessionExpiredError extends Error {
@@ -98,54 +100,22 @@ async function apiFetch(input: RequestInfo | URL, init: RequestInit = {}): Promi
   return fetch(input, createApiRequestInit(init));
 }
 
-function extractLocalizedValue(value: UsosLocalizedValue | undefined): string {
-  if (value && typeof value === 'object') {
-    return firstNonEmpty(value.pl, value.en);
-  }
-  return firstNonEmpty(value);
-}
-
-function extractLocalized<T extends object>(obj: T | null | undefined, key: string): string {
-  if (!obj || typeof obj !== 'object') return '';
-  return extractLocalizedValue((obj as Record<string, UsosLocalizedValue | undefined>)[key]);
-}
-
-function formatStudyMode(value: unknown): string {
-  const mode = Number(value);
-  if (mode === 1) return 'Stacjonarne';
-  if (mode === 2) return 'Niestacjonarne';
-  return '';
-}
-
-function mapUsosStudyStatus(status: string | undefined): string {
-  switch (status) {
-    case 'active': return 'Aktywny';
-    case 'cancelled': return 'Anulowany';
-    case 'graduated_diploma': return 'Absolwent';
-    case 'graduated_end_of_study':
-    case 'graduated_before_diploma':
-      return 'Absolwent (ukończone)';
-    default:
-      return firstNonEmpty(status);
-  }
-}
-
 function fallbackStudy(session: SessionData): Study {
+  void session;
   return {
     przynaleznoscId: 'usos-profile',
-    label: session.userId ? `Student ${session.userId}` : 'Dane z USOS',
+    label: 'Profil USOS',
   };
 }
 
 function mapUsosStudies(me: UsosMeResponse, session: SessionData): Study[] {
-  const studies = ensureArray<UsosProgrammeRow>(me.programmes)
+  const studies = ensureArray<UsosProfileProgramme>(me.programmes)
     .map((row) => {
-      const programme = row.programme;
-      const id = firstNonEmpty(programme?.id);
+      const id = firstNonEmpty(row.studentProgrammeId, row.programmeId);
       if (!id) return null;
 
-      const label = extractLocalized(programme, 'description') || id;
-      const mode = formatStudyMode(programme?.mode_of_studies);
+      const label = firstNonEmpty(row.name, row.programmeId, id);
+      const mode = firstNonEmpty(row.mode);
       return {
         przynaleznoscId: id,
         label: mode ? `${label} (${mode.toLocaleLowerCase('pl-PL')})` : label,
@@ -156,17 +126,25 @@ function mapUsosStudies(me: UsosMeResponse, session: SessionData): Study[] {
   return studies.length ? studies : [fallbackStudy(session)];
 }
 
-async function fetchUsosMe(usos: UsosSessionData): Promise<UsosMeResponse> {
-  const response = await apiFetch(`${API_BASE}/usos/me`, {
+function normalizeStringArray(value: unknown): string[] {
+  return ensureArray<unknown>(value)
+    .map((item) => firstNonEmpty(item))
+    .filter(Boolean);
+}
+
+async function postUsosEndpoint<T>(usos: UsosSessionData, path: string, payload: Record<string, unknown> = {}): Promise<T> {
+  const response = await apiFetch(`${API_BASE}${path}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       token: usos.accessToken,
       secret: usos.accessTokenSecret,
+      scopes: usos.scopes ?? [],
+      ...payload,
     }),
   });
 
-  const body = (await response.json().catch(() => ({}))) as { error?: string } & UsosMeResponse;
+  const body = (await response.json().catch(() => ({}))) as { error?: string } & T;
   if (!response.ok) {
     const errorMessage = body.error || `USOS API error: ${response.status}`;
     if (hasHttpAuthError(response.status, errorMessage)) {
@@ -176,6 +154,93 @@ async function fetchUsosMe(usos: UsosSessionData): Promise<UsosMeResponse> {
   }
 
   return body;
+}
+
+async function fetchUsosMe(usos: UsosSessionData): Promise<UsosMeResponse> {
+  return postUsosEndpoint<UsosMeResponse>(usos, '/usos/me');
+}
+
+function fixImageUrls(html: string): string {
+  return html.replace(/<img([^>]*?)src=["']([^"']+)["']([^>]*?)>/gi, (
+    _match: string,
+    before: string,
+    src: string,
+    after: string,
+  ) => {
+    let fixedSrc = src;
+    if (fixedSrc && !fixedSrc.startsWith('http') && !fixedSrc.startsWith('data:')) {
+      fixedSrc = fixedSrc.startsWith('/')
+        ? `https://www.zut.edu.pl${fixedSrc}`
+        : `https://www.zut.edu.pl/${fixedSrc}`;
+    }
+    return `<img${before}src="${fixedSrc}"${after}>`;
+  });
+}
+
+async function proxyRssXml(): Promise<string> {
+  const response = await apiFetch(`${API_BASE}/proxy/rss`);
+  const body = (await response.json().catch(() => ({}))) as { xml?: string; error?: string };
+  if (!response.ok) {
+    throw new Error(body.error || `RSS proxy HTTP ${response.status}`);
+  }
+  return body.xml || '';
+}
+
+function parseRssNews(xml: string): NewsItem[] {
+  if (!xml.trim()) return [];
+
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(xml, 'application/xml');
+  const items = Array.from(doc.querySelectorAll('item'));
+
+  return items.map((item, index) => {
+    const title = firstNonEmpty(item.querySelector('title')?.textContent ?? '');
+    const link = firstNonEmpty(item.querySelector('link')?.textContent ?? '');
+    const pubDateRaw = firstNonEmpty(item.querySelector('pubDate')?.textContent ?? '');
+
+    const descriptionHtml = fixImageUrls(firstNonEmpty(item.querySelector('description')?.textContent ?? ''));
+    const contentNode = item.getElementsByTagName('content:encoded')[0] ?? item.getElementsByTagName('encoded')[0];
+    const contentHtml = fixImageUrls(firstNonEmpty(contentNode?.textContent ?? ''));
+    const htmlForText = descriptionHtml || contentHtml;
+
+    const descriptionText = String(htmlForText)
+      .replace(/<[^>]+>/g, ' ')
+      .replace(/&nbsp;/g, ' ')
+      .replace(/&amp;/g, '&')
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&quot;/g, '"')
+      .replace(/&#39;/g, "'")
+      .replace(/\s+/g, ' ')
+      .trim();
+    const snippet = descriptionText.length > 220 ? `${descriptionText.slice(0, 217)}...` : descriptionText;
+
+    const imgMatch = (contentHtml || descriptionHtml).match(/<img[^>]+src=["']([^"']+)["'][^>]*>/i);
+    const thumbUrl = imgMatch?.[1] ?? '';
+    const parsedDate = new Date(pubDateRaw);
+    const date = Number.isFinite(parsedDate.getTime())
+      ? new Intl.DateTimeFormat('pl-PL', {
+          day: '2-digit',
+          month: '2-digit',
+          year: 'numeric',
+          hour: '2-digit',
+          minute: '2-digit',
+        }).format(parsedDate)
+      : pubDateRaw;
+
+    return {
+      id: index,
+      title,
+      date,
+      pubDateRaw,
+      snippet,
+      link,
+      descriptionHtml,
+      descriptionText,
+      contentHtml,
+      thumbUrl,
+    };
+  });
 }
 
 async function proxyPlanStudent(query: Record<string, string>): Promise<Record<string, unknown>[]> {
@@ -237,7 +302,10 @@ export async function login(): Promise<SessionData> {
 }
 
 export async function fetchUsosRequestToken(callbackUrl: string): Promise<{ oauth_token: string; oauth_token_secret: string }> {
-  const response = await apiFetch(`${API_BASE}/usos/request-token?callbackUrl=${encodeURIComponent(callbackUrl)}&scopes=${USOS_LOGIN_SCOPES}`);
+  const url = new URL(`${API_BASE}/usos/request-token`, window.location.origin);
+  url.searchParams.set('callbackUrl', callbackUrl);
+  url.searchParams.set('scopes', USOS_LOGIN_SCOPES);
+  const response = await apiFetch(url.origin === window.location.origin ? `${url.pathname}${url.search}` : url.toString());
   const body = await response.json();
   if (!response.ok) throw new Error(body.error || 'Błąd pobierania tokenu USOS.');
   return body;
@@ -260,17 +328,14 @@ export async function loginWithUsos(verifier: string, token: string, secret: str
   const usos: UsosSessionData = {
     accessToken: body.oauth_token,
     accessTokenSecret: body.oauth_token_secret,
+    scopes: normalizeStringArray(body.scopes),
+    authorizedAt: Number.isFinite(Number(body.authorizedAt)) ? Number(body.authorizedAt) : Date.now(),
+    expiresAt: Number.isFinite(Number(body.expiresAt)) ? Number(body.expiresAt) : undefined,
   };
   const me = await fetchUsosMe(usos);
   const user = me.user ?? {};
-  const firstName = firstNonEmpty(user.first_name);
-  const lastName = firstNonEmpty(user.last_name);
-  const rawPhoto = user.photo_urls?.['200x200']
-    || user.photo_urls?.['100x100']
-    || user.photo_urls?.['50x50']
-    || '';
   const studies = mapUsosStudies(me, {
-    userId: firstNonEmpty(user.student_number, user.id, 'usos_user'),
+    userId: firstNonEmpty(user.studentNumber, user.id, 'usos_user'),
     username: '',
     authKey: '',
     imageUrl: '',
@@ -279,10 +344,10 @@ export async function loginWithUsos(verifier: string, token: string, secret: str
   });
 
   return {
-    userId: firstNonEmpty(user.student_number, user.id, 'usos_user'),
-    username: firstNonEmpty(`${firstName} ${lastName}`.trim(), firstNonEmpty(user.id), 'Użytkownik USOS'),
+    userId: firstNonEmpty(user.studentNumber, user.id, 'usos_user'),
+    username: firstNonEmpty(user.name, `${firstNonEmpty(user.firstName)} ${firstNonEmpty(user.lastName)}`.trim(), firstNonEmpty(user.id), 'Użytkownik USOS'),
     authKey: '',
-    imageUrl: rawPhoto ? `${API_BASE}/usos/image?url=${encodeURIComponent(rawPhoto)}` : '',
+    imageUrl: '',
     activeStudyId: studies[0]?.przynaleznoscId ?? 'usos-profile',
     usos,
   };
@@ -306,9 +371,10 @@ export async function fetchCombinedStudies(session: SessionData): Promise<Study[
 }
 
 export async function fetchSemesters(session: SessionData, studyId: string | null): Promise<Semester[]> {
-  void session;
   void studyId;
-  return [];
+  if (!session.usos) return [];
+  const body = await postUsosEndpoint<{ semesters?: Semester[] }>(session.usos, '/usos/semesters');
+  return ensureArray<Semester>(body.semesters);
 }
 
 export async function fetchCombinedSemesters(session: SessionData, studyId: string | null): Promise<Semester[]> {
@@ -316,9 +382,9 @@ export async function fetchCombinedSemesters(session: SessionData, studyId: stri
 }
 
 export async function fetchGrades(session: SessionData, semesterId: string): Promise<Grade[]> {
-  void session;
-  void semesterId;
-  return [];
+  if (!session.usos) return [];
+  const body = await postUsosEndpoint<{ grades?: Grade[] }>(session.usos, '/usos/grades', { termId: semesterId });
+  return ensureArray<Grade>(body.grades);
 }
 
 export async function fetchCombinedGrades(session: SessionData, semesterId: string): Promise<Grade[]> {
@@ -326,9 +392,10 @@ export async function fetchCombinedGrades(session: SessionData, semesterId: stri
 }
 
 export async function fetchFinance(session: SessionData, studyId: string | null): Promise<FinanceRecord[]> {
-  void session;
   void studyId;
-  return [];
+  if (!session.usos) return [];
+  const body = await postUsosEndpoint<{ records?: FinanceRecord[] }>(session.usos, '/usos/finance');
+  return ensureArray<FinanceRecord>(body.records);
 }
 
 export async function fetchInfo(
@@ -339,39 +406,57 @@ export async function fetchInfo(
     return { details: null, history: [], els: null, calendarEvents: [] };
   }
 
-  const me = await fetchUsosMe(session.usos);
-  const programmes = ensureArray<UsosProgrammeRow>(me.programmes);
-  const target = programmes.find((row) => firstNonEmpty(row.programme?.id) === studyId) ?? programmes[0];
-  const programme = target?.programme;
-  const details: StudyDetails = {
-    album: session.userId,
-    wydzial: '',
-    kierunek: programme ? extractLocalized(programme, 'description') : '',
-    forma: formatStudyMode(programme?.mode_of_studies),
-    poziom: extractLocalized(programme, 'level_of_studies'),
-    specjalnosc: '',
-    specjalizacja: '',
-    status: mapUsosStudyStatus(target?.status),
-    rokAkademicki: '',
-    semestrLabel: '',
-  };
+  return postUsosEndpoint<{
+    details: StudyDetails | null;
+    history: StudyHistoryItem[];
+    els?: ElsCard | null;
+    calendarEvents?: CalendarEvent[];
+  }>(session.usos, '/usos/info', { studyId });
+}
 
-  const history = programmes
-    .map((row) => {
-      const label = extractLocalized(row.programme, 'description') || firstNonEmpty(row.programme?.id);
-      if (!label) return null;
-      return {
-        label,
-        status: mapUsosStudyStatus(row.status),
-      };
-    })
-    .filter((item): item is StudyHistoryItem => Boolean(item));
-
-  return { details, history, els: null, calendarEvents: [] };
+async function fetchUsosNews(): Promise<NewsItem[]> {
+  const response = await apiFetch(`${API_BASE}/usos/news`);
+  const body = (await response.json().catch(() => ({}))) as { items?: NewsItem[]; error?: string };
+  if (!response.ok) throw new Error(body.error || `USOS news HTTP ${response.status}`);
+  return ensureArray<NewsItem>(body.items);
 }
 
 export async function fetchNews(): Promise<NewsItem[]> {
-  return [];
+  try {
+    const rssItems = parseRssNews(await proxyRssXml());
+    if (rssItems.length > 0) return rssItems;
+  } catch {
+    // USOS news stays as a fallback; the public ZUT RSS is the primary feed.
+  }
+
+  return fetchUsosNews();
+}
+
+export async function fetchStudentPhotoBlob(session: SessionData): Promise<Blob | null> {
+  if (!session.usos) return null;
+
+  const response = await apiFetch(`${API_BASE}/usos/photo`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      token: session.usos.accessToken,
+      secret: session.usos.accessTokenSecret,
+      scopes: session.usos.scopes ?? [],
+    }),
+  });
+
+  if (response.status === 404) return null;
+  if (!response.ok) {
+    const body = (await response.json().catch(() => ({}))) as { error?: string };
+    const errorMessage = body.error || `USOS photo HTTP ${response.status}`;
+    if (hasHttpAuthError(response.status, errorMessage)) {
+      throw new SessionExpiredError();
+    }
+    throw new Error(errorMessage);
+  }
+
+  const blob = await response.blob();
+  return blob.size > 0 ? blob : null;
 }
 
 function startOfDay(date: Date): Date {

@@ -66,12 +66,6 @@ export function HomeScreen({ session, isOnline, t, openScreen }: HomeScreenProps
             <div className="home-hero-avatar">{firstName[0]?.toUpperCase() ?? 'S'}</div>
           </div>
 
-          {session?.usos && (
-            <div className="usos-warning-banner" style={{ marginTop: '16px', background: 'rgba(255, 152, 0, 0.1)', border: '1px solid rgba(255, 152, 0, 0.3)', borderRadius: '8px', padding: '12px', fontSize: '14px', color: 'var(--mz-text)' }}>
-              <strong style={{ color: '#ff9800', display: 'block', marginBottom: '4px' }}>⚠ Uwaga (Tryb USOS)</strong>
-              Zalogowano za pomocą systemu USOS. Niektóre funkcje mogą działać nieprawidłowo lub nie wyświetlać wszystkich danych, ponieważ uczelnia wciąż wdraża ten system.
-            </div>
-          )}
           {!isOnline && (
             <span className="offline-badge"><Ic n="wifi-off" />{t('home.offlineMode')}</span>
           )}

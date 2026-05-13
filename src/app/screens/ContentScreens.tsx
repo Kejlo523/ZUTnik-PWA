@@ -6,6 +6,81 @@ import type { TranslateFn } from '../viewTypes';
 import { LOGO_SRC } from '../constants';
 import { Ic, Skeleton, Toggle } from '../ui';
 
+const NEWS_HTML_ALLOWED_TAGS = new Set(['p', 'br', 'strong', 'b', 'em', 'i', 'u', 'ul', 'ol', 'li', 'a', 'img', 'blockquote', 'h2', 'h3', 'h4']);
+const NEWS_HTML_TEXTLESS_TAGS = new Set(['script', 'style', 'iframe', 'object', 'embed', 'form', 'input', 'button', 'svg', 'math']);
+
+function isSafeNewsUrl(value: string, image = false): string {
+  try {
+    const url = new URL(value, window.location.origin);
+    if (url.protocol === 'http:' || url.protocol === 'https:' || (!image && url.protocol === 'mailto:')) {
+      return url.href;
+    }
+  } catch {
+    return '';
+  }
+  return '';
+}
+
+function sanitizeNewsHtml(html: string): string {
+  if (!html.trim()) return '';
+
+  const template = document.createElement('template');
+  template.innerHTML = html;
+
+  const sanitizeNode = (node: Node) => {
+    if (!(node instanceof Element)) return;
+
+    for (const child of Array.from(node.childNodes)) {
+      sanitizeNode(child);
+    }
+
+    const tag = node.tagName.toLowerCase();
+    if (NEWS_HTML_TEXTLESS_TAGS.has(tag)) {
+      node.remove();
+      return;
+    }
+
+    if (!NEWS_HTML_ALLOWED_TAGS.has(tag)) {
+      node.replaceWith(...Array.from(node.childNodes));
+      return;
+    }
+
+    const previous = new Map(Array.from(node.attributes).map((attr) => [attr.name.toLowerCase(), attr.value]));
+    for (const attr of Array.from(node.attributes)) {
+      node.removeAttribute(attr.name);
+    }
+
+    if (tag === 'a') {
+      const href = isSafeNewsUrl(previous.get('href') || '');
+      if (href) {
+        node.setAttribute('href', href);
+        node.setAttribute('target', '_blank');
+        node.setAttribute('rel', 'noreferrer');
+      }
+      const title = previous.get('title');
+      if (title) node.setAttribute('title', title);
+    }
+
+    if (tag === 'img') {
+      const src = isSafeNewsUrl(previous.get('src') || '', true);
+      if (!src) {
+        node.remove();
+        return;
+      }
+      node.setAttribute('src', src);
+      node.setAttribute('alt', previous.get('alt') || '');
+      node.setAttribute('loading', 'lazy');
+      node.setAttribute('decoding', 'async');
+    }
+  };
+
+  for (const child of Array.from(template.content.childNodes)) {
+    sanitizeNode(child);
+  }
+
+  return template.innerHTML;
+}
+
 function NewsLoadingSkeleton() {
   return (
     <div className="list-stack news-skeleton-grid">
@@ -72,7 +147,7 @@ export function NewsDetailScreen({ item, t }: NewsDetailScreenProps) {
     return <section className="screen news-detail-screen"><div className="empty-state"><p>{t('newsDetail.noContent')}</p></div></section>;
   }
 
-  const fullHtml = item.contentHtml || item.descriptionHtml;
+  const fullHtml = sanitizeNewsHtml(item.contentHtml || item.descriptionHtml);
 
   return (
     <section className="screen news-detail-screen">

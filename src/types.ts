@@ -3,6 +3,9 @@ export type ViewMode = 'day' | 'week' | 'month';
 export interface UsosSessionData {
   accessToken: string;
   accessTokenSecret: string;
+  scopes?: string[];
+  authorizedAt?: number;
+  expiresAt?: number;
 }
 
 export interface SessionData {

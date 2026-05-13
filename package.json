@@ -12,6 +12,7 @@
     "preview": "vite preview",
     "start": "node server/index.mjs",
     "icons": "node scripts-generate-icons.mjs",
+    "test:mappers": "node server/usos/mappers.test.mjs",
     "lint": "eslint ."
   },
   "dependencies": {

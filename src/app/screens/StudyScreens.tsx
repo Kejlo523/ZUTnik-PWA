@@ -387,6 +387,7 @@ interface GradesScreenProps {
   groupedGrades: GroupedGradeView[];
   expandedGradeSubjects: Record<string, boolean>;
   setExpandedGradeSubjects: Dispatch<SetStateAction<Record<string, boolean>>>;
+  hasProgrammeSplitNotice?: boolean;
 }
 
 export function GradesScreen({
@@ -405,6 +406,7 @@ export function GradesScreen({
   groupedGrades,
   expandedGradeSubjects,
   setExpandedGradeSubjects,
+  hasProgrammeSplitNotice = false,
 }: GradesScreenProps) {
   const showGradesSkeleton = gradesLoading && grades.length === 0;
 
@@ -446,6 +448,9 @@ export function GradesScreen({
                   </label>
                 )}
               </div>
+              {hasProgrammeSplitNotice && (
+                <div className="usos-scope-note">{t('usos.programmeSplitNotice')}</div>
+              )}
             </div>
           </div>
 
@@ -557,6 +562,7 @@ interface FinanceScreenProps {
   financeLoading: boolean;
   financeFetchedAt: number;
   onToast: (message: string) => void;
+  hasProgrammeSplitNotice?: boolean;
 }
 
 export function FinanceScreen({
@@ -568,6 +574,7 @@ export function FinanceScreen({
   financeLoading,
   financeFetchedAt,
   onToast,
+  hasProgrammeSplitNotice = false,
 }: FinanceScreenProps) {
   const [filter, setFilter] = useState<FinanceFilterKey>('all');
   const [noticeOpen, setNoticeOpen] = useState(false);
@@ -697,6 +704,9 @@ export function FinanceScreen({
                   </button>
                 ))}
               </div>
+              {hasProgrammeSplitNotice && (
+                <div className="usos-scope-note">{t('usos.programmeSplitNotice')}</div>
+              )}
             </div>
           </div>
 

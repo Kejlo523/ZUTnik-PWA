@@ -2616,6 +2616,18 @@ button.outline {
   height: 40px;
 }
 
+.usos-scope-note {
+  margin-top: 8px;
+  border-radius: 12px;
+  border: 1px solid var(--mz-border-soft);
+  background: var(--mz-bg-soft);
+  padding: 9px 10px;
+  color: var(--mz-muted);
+  font-size: 12px;
+  line-height: 1.45;
+  font-weight: 650;
+}
+
 .grades-surface {
   background: var(--mz-card);
   border-radius: 18px;

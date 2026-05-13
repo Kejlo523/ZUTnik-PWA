@@ -28,6 +28,7 @@ import {
   fetchPlanSemesterExport,
   fetchPlanSuggestions,
   fetchPlanWindow,
+  fetchStudentPhotoBlob,
   fetchUsosRequestToken,
   isSessionExpiredError,
   loginWithUsos,
@@ -282,6 +283,7 @@ function App() {
   const [newsLoading, setNewsLoading] = useState(false);
 
   const activeStudyId = session?.activeStudyId ?? studies[0]?.przynaleznoscId ?? null;
+  const hasMultipleUsosProgrammes = studies.length > 1;
   const currentPlanAlbum = useMemo(() => (planResult?.debug.album || '').trim(), [planResult?.debug.album]);
   const hiddenPlanSubjectKeys = useMemo(() => (
     currentPlanAlbum ? (planHiddenSubjectKeysByAlbum[currentPlanAlbum] ?? []) : []
@@ -354,26 +356,27 @@ function App() {
     setStudentPhotoError(false);
     setStudentPhotoBlobUrl(null);
 
-    const url = session?.imageUrl;
-    if (!url) return;
+    if (!session?.usos) return;
 
     let cancelled = false;
+    let createdBlobUrl: string | null = null;
     (async () => {
       try {
-        const resp = await fetch(url);
+        const blob = await fetchStudentPhotoBlob(session);
         if (cancelled) return;
-        if (!resp.ok) { setStudentPhotoError(true); return; }
-        const blob = await resp.blob();
-        if (cancelled) return;
-        if (blob.size === 0) { setStudentPhotoError(true); return; }
+        if (!blob || blob.size === 0) { setStudentPhotoError(true); return; }
         const blobUrl = URL.createObjectURL(blob);
+        createdBlobUrl = blobUrl;
         setStudentPhotoBlobUrl(blobUrl);
       } catch {
         if (!cancelled) setStudentPhotoError(true);
       }
     })();
-    return () => { cancelled = true; };
-  }, [session?.imageUrl]);
+    return () => {
+      cancelled = true;
+      if (createdBlobUrl) URL.revokeObjectURL(createdBlobUrl);
+    };
+  }, [session, sessionKey]);
 
   const showToast = useCallback((msg: string) => setToast(msg), []);
 
@@ -683,14 +686,16 @@ function App() {
 
     // Show cached first
     const cached = cache.loadStudiesForce() ?? [];
-    if (cached.length) {
+    const cachedIsOnlyFallback = cached.length === 1
+      && (cached[0].przynaleznoscId === 'usos-profile' || /^Student\s+\S+/i.test(cached[0].label));
+    if (cached.length && !cachedIsOnlyFallback) {
       setStudies(cached);
       if (!sess.activeStudyId && cached[0].przynaleznoscId) {
         updateActiveStudy(cached[0].przynaleznoscId);
       }
     }
     // Fresh if TTL expired or no cache
-    if (!cache.loadStudies()) {
+    if (!cache.loadStudies() || cachedIsOnlyFallback) {
       setGlobalLoad(true);
       setGlobalError('');
       try {
@@ -702,7 +707,8 @@ function App() {
         }
       } catch (e) {
         if (handleSessionError(e)) return;
-        if (!cached.length) setGlobalError(e instanceof Error ? e.message : 'Nie można pobrać kierunków.');
+        if (cached.length && cachedIsOnlyFallback) setStudies(cached);
+        if (!cached.length || cachedIsOnlyFallback) setGlobalError(e instanceof Error ? e.message : 'Nie można pobrać kierunków.');
       } finally {
         setGlobalLoad(false);
       }
@@ -1018,7 +1024,7 @@ function App() {
       }
 
       const semFingerprint = safeSems.map(s => s.listaSemestrowId).join('|');
-      const totalEctsCacheKey = `zutnik_total_ects_${session.userId}_${activeStudyId}`;
+      const totalEctsCacheKey = `zutnik_usos_total_ects_${session.userId}_${activeStudyId}`;
       try {
         const cachedRaw = window.localStorage.getItem(totalEctsCacheKey);
         if (cachedRaw) {
@@ -2192,6 +2198,7 @@ function App() {
         groupedGrades={groupedGrades}
         expandedGradeSubjects={expandedGradeSubjects}
         setExpandedGradeSubjects={setExpandedGradeSubjects}
+        hasProgrammeSplitNotice={hasMultipleUsosProgrammes}
       />
     );
   }
@@ -2207,6 +2214,7 @@ function App() {
         financeLoading={financeLoading}
         financeFetchedAt={financeSnapshot.fetchedAt}
         onToast={showToast}
+        hasProgrammeSplitNotice={hasMultipleUsosProgrammes}
       />
     );
   }

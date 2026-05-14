@@ -1,4 +1,13 @@
-export const REQUIRED_USOS_SCOPES = ['studies', 'grades', 'payments', 'cards', 'photo'];
+export const REQUIRED_USOS_SCOPES = [
+  'studies',
+  'grades',
+  'payments',
+  'cards',
+  'photo',
+  'crstests',
+  'surveys_filling',
+  'offline_access',
+];
 
 export function firstNonEmpty(...values) {
   for (const value of values) {
@@ -347,6 +356,193 @@ export function mapCalendarEvents(events) {
     type: firstNonEmpty(event?.type),
     isDayOff: event?.is_day_off === true,
   })).filter((event) => event.id || event.name);
+}
+
+export function mapCreditSummary({ studentProgrammeId, programmeUsed, overallUsed }) {
+  const normalize = (value) => {
+    const parsed = parseFlexibleNumber(value);
+    return Number.isFinite(parsed) && Math.abs(parsed) > 0.0001 ? parsed : (firstNonEmpty(value) === '0' ? 0 : null);
+  };
+
+  return {
+    studentProgrammeId: firstNonEmpty(studentProgrammeId),
+    programmeUsed: normalize(programmeUsed),
+    overallUsed: normalize(overallUsed),
+  };
+}
+
+function userName(user) {
+  return firstNonEmpty(
+    user?.name,
+    `${firstNonEmpty(user?.first_name)} ${firstNonEmpty(user?.last_name)}`.trim(),
+    user?.id,
+  );
+}
+
+function surveyTypeLabel(type) {
+  switch (String(type || '').toLowerCase()) {
+    case 'course': return 'Kurs';
+    case 'general': return 'Ogólna';
+    default: return firstNonEmpty(type);
+  }
+}
+
+export function mapSurveyItems(surveys) {
+  return asArray(surveys).map((survey) => {
+    const group = survey?.group && typeof survey.group === 'object' ? survey.group : {};
+    const courseUnit = group.course_unit && typeof group.course_unit === 'object' ? group.course_unit : {};
+    const course = courseUnit.course && typeof courseUnit.course === 'object' ? courseUnit.course : {};
+    const lecturer = survey?.lecturer && typeof survey.lecturer === 'object' ? survey.lecturer : {};
+    const faculty = survey?.faculty && typeof survey.faculty === 'object' ? survey.faculty : {};
+    const programme = survey?.programme && typeof survey.programme === 'object' ? survey.programme : {};
+
+    return {
+      id: firstNonEmpty(survey?.id),
+      title: localizedField(survey, 'name') || firstNonEmpty(survey?.id, 'Ankieta'),
+      type: surveyTypeLabel(survey?.survey_type),
+      startDate: formatIsoDate(survey?.start_date),
+      endDate: formatIsoDate(survey?.end_date),
+      canFillOut: survey?.can_i_fill_out === true,
+      didFillOut: survey?.did_i_fill_out === true,
+      headlineHtml: sanitizeHtml(localizedField(survey, 'headline_html')),
+      courseName: localizedField(course, 'name') || localizedField(courseUnit, 'course_name') || firstNonEmpty(courseUnit?.course_id),
+      lecturerName: userName(lecturer),
+      facultyName: localizedField(faculty, 'name'),
+      programmeName: localizedField(programme, 'name'),
+    };
+  }).filter((survey) => survey.id || survey.title);
+}
+
+function courseEditionTermId(courseEdition) {
+  return firstNonEmpty(courseEdition?.term_id, courseEdition?.term?.id);
+}
+
+function courseEditionCourseId(courseEdition) {
+  const course = courseEdition?.course && typeof courseEdition.course === 'object' ? courseEdition.course : {};
+  return firstNonEmpty(courseEdition?.course_id, course?.id);
+}
+
+function courseEditionName(courseEdition) {
+  const course = courseEdition?.course && typeof courseEdition.course === 'object' ? courseEdition.course : {};
+  return localizedField(course, 'name')
+    || localizedField(courseEdition, 'course_name')
+    || firstNonEmpty(courseEdition?.course_name, courseEditionCourseId(courseEdition));
+}
+
+function nodeId(node) {
+  return firstNonEmpty(node?.node_id, node?.id);
+}
+
+function nodeType(node) {
+  return firstNonEmpty(node?.type).toLowerCase();
+}
+
+function nodeDisplayName(node) {
+  return localizedField(node, 'name') || firstNonEmpty(nodeId(node), 'Pozycja');
+}
+
+function flattenNodeTree(node, path = []) {
+  if (!node || typeof node !== 'object') return [];
+  const currentPath = [...path, parseFlexibleNumber(node.order)];
+  const current = { ...node, __orderPath: currentPath };
+  const children = asArray(node.subnodes).flatMap((child) => flattenNodeTree(child, currentPath));
+  return [current, ...children];
+}
+
+function courseTestGradeValue(entry) {
+  const grade = entry?.grade && typeof entry.grade === 'object' ? entry.grade : entry;
+  return firstNonEmpty(
+    grade?.value_symbol,
+    localizedField(grade, 'value_description'),
+    grade?.symbol,
+    grade?.order,
+  );
+}
+
+function compareOrderPath(left, right) {
+  const a = Array.isArray(left.__orderPath) ? left.__orderPath : [];
+  const b = Array.isArray(right.__orderPath) ? right.__orderPath : [];
+  const max = Math.max(a.length, b.length);
+  for (let i = 0; i < max; i += 1) {
+    const av = Number.isFinite(a[i]) ? a[i] : 0;
+    const bv = Number.isFinite(b[i]) ? b[i] : 0;
+    if (av !== bv) return av - bv;
+  }
+  return nodeDisplayName(left).localeCompare(nodeDisplayName(right), 'pl');
+}
+
+export function mapCourseTests({ tests, nodeTreesByRootId = {}, pointsByRootId = {}, gradesByRootId = {}, termId = '' }) {
+  return asArray(tests).map((test, index) => {
+    const courseEdition = test?.course_edition && typeof test.course_edition === 'object' ? test.course_edition : {};
+    const root = test?.root && typeof test.root === 'object' ? test.root : {};
+    const rootId = nodeId(root);
+    const courseTermId = courseEditionTermId(courseEdition);
+    if (termId && courseTermId && courseTermId !== termId) return null;
+
+    const tree = nodeTreesByRootId[rootId] || root;
+    const nodes = flattenNodeTree(tree).filter((node) => nodeId(node));
+    const pointsByNode = new Map(asArray(pointsByRootId[rootId]).map((point) => [firstNonEmpty(point?.node_id), point]));
+    const gradesByNode = new Map(asArray(gradesByRootId[rootId]).map((grade) => [firstNonEmpty(grade?.node_id), grade]));
+
+    const scores = nodes
+      .filter((node) => {
+        const type = nodeType(node);
+        return type === 'task' || type === 'grade';
+      })
+      .map((node) => {
+        const id = nodeId(node);
+        const type = nodeType(node);
+        if (type === 'task') {
+          const point = pointsByNode.get(id);
+          if (!point) return null;
+          const points = parseFlexibleNumber(point?.points);
+          const maxPoints = firstNonEmpty(node?.points_max) ? parseFlexibleNumber(node.points_max) : null;
+          return {
+            id,
+            name: nodeDisplayName(node),
+            type: 'points',
+            value: firstNonEmpty(point?.points),
+            points: Number.isFinite(points) ? points : null,
+            maxPoints: Number.isFinite(maxPoints) ? maxPoints : null,
+            date: formatIsoDate(point?.last_changed),
+            comment: firstNonEmpty(point?.comment, point?.public_comment),
+            __orderPath: node.__orderPath,
+          };
+        }
+
+        const grade = gradesByNode.get(id);
+        const value = grade ? courseTestGradeValue(grade) : '';
+        if (!value) return null;
+        return {
+          id,
+          name: nodeDisplayName(node),
+          type: 'grade',
+          value,
+          points: null,
+          maxPoints: null,
+          date: formatIsoDate(grade?.last_changed),
+          comment: firstNonEmpty(grade?.public_comment),
+          __orderPath: node.__orderPath,
+        };
+      })
+      .filter(Boolean)
+      .sort(compareOrderPath)
+      .map(({ __orderPath, ...score }) => score);
+
+    if (scores.length === 0) return null;
+
+    return {
+      id: firstNonEmpty(test?.id, rootId, index),
+      rootId,
+      courseId: courseEditionCourseId(courseEdition),
+      termId: courseTermId,
+      courseName: courseEditionName(courseEdition),
+      testName: nodeDisplayName(tree) || nodeDisplayName(root),
+      scores,
+    };
+  }).filter(Boolean).sort((left, right) => (
+    firstNonEmpty(left.courseName, left.testName).localeCompare(firstNonEmpty(right.courseName, right.testName), 'pl')
+  ));
 }
 
 const ALLOWED_TAGS = new Set(['p', 'br', 'strong', 'b', 'em', 'i', 'u', 'ul', 'ol', 'li', 'a', 'img', 'blockquote', 'h2', 'h3', 'h4']);

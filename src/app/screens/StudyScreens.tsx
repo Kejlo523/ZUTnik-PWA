@@ -2,6 +2,8 @@ import { useMemo, useState, type Dispatch, type SetStateAction } from 'react';
 
 import type {
   CalendarEvent,
+  CourseTest,
+  CreditSummary,
   ElsCard,
   FinanceRecord,
   Grade,
@@ -10,6 +12,7 @@ import type {
   Study,
   StudyDetails,
   StudyHistoryItem,
+  SurveyItem,
 } from '../../types';
 import type { AppSettings } from '../../services/storage';
 import type { GroupedGradeView, TranslateFn } from '../viewTypes';
@@ -329,6 +332,29 @@ function buildFinanceDetailsText(record: FinanceRecord, t: TranslateFn): string 
   return lines.filter(Boolean).join('\n');
 }
 
+function formatNullableNumber(value: number | null | undefined, fractionDigits = 1): string {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return '–';
+  return new Intl.NumberFormat('pl-PL', {
+    minimumFractionDigits: Math.abs(value - Math.round(value)) > 0.0001 ? fractionDigits : 0,
+    maximumFractionDigits: fractionDigits,
+  }).format(value);
+}
+
+function formatCourseTestScore(score: CourseTest['scores'][number]): string {
+  if (score.type === 'points') {
+    const points = formatNullableNumber(score.points);
+    if (typeof score.maxPoints === 'number' && Number.isFinite(score.maxPoints)) {
+      return `${points}/${formatNullableNumber(score.maxPoints)} pkt`;
+    }
+    return `${points} pkt`;
+  }
+  return score.value || '–';
+}
+
+function hasMissingScope(scopes: string[], scope: string): boolean {
+  return scopes.includes(scope);
+}
+
 function InfoMainLoadingSkeleton() {
   return (
     <div className="info-main">
@@ -385,6 +411,9 @@ interface GradesScreenProps {
   grades: Grade[];
   settings: AppSettings;
   groupedGrades: GroupedGradeView[];
+  courseTests: CourseTest[];
+  courseTestsLoading: boolean;
+  courseTestsMissingScopes: string[];
   expandedGradeSubjects: Record<string, boolean>;
   setExpandedGradeSubjects: Dispatch<SetStateAction<Record<string, boolean>>>;
   hasProgrammeSplitNotice?: boolean;
@@ -404,11 +433,17 @@ export function GradesScreen({
   grades,
   settings,
   groupedGrades,
+  courseTests,
+  courseTestsLoading,
+  courseTestsMissingScopes,
   expandedGradeSubjects,
   setExpandedGradeSubjects,
   hasProgrammeSplitNotice = false,
 }: GradesScreenProps) {
   const showGradesSkeleton = gradesLoading && grades.length === 0;
+  const showCourseTestsEmpty = !courseTestsLoading
+    && courseTests.length === 0
+    && !hasMissingScope(courseTestsMissingScopes, 'crstests');
 
   return (
     <section className="screen grades-screen">
@@ -543,6 +578,68 @@ export function GradesScreen({
                       </div>
                     </div>
                   ))}
+                </div>
+              )}
+              {courseTestsLoading && courseTests.length === 0 && (
+                <div className="course-tests-panel course-tests-panel-loading">
+                  <div className="course-tests-head">
+                    <Skeleton className="skeleton-line skeleton-line-sm" style={{ width: '160px' }} />
+                    <Skeleton className="skeleton-pill" style={{ width: '72px' }} />
+                  </div>
+                  <Skeleton className="skeleton-line skeleton-line-xs" style={{ width: '72%' }} />
+                  <Skeleton className="skeleton-line skeleton-line-xs" style={{ width: '54%' }} />
+                </div>
+              )}
+              {hasMissingScope(courseTestsMissingScopes, 'crstests') && (
+                <div className="course-tests-panel course-tests-note">
+                  <div className="course-tests-title">{t('grades.courseTestsTitle')}</div>
+                  <p>{t('grades.courseTestsNeedsLogin')}</p>
+                </div>
+              )}
+              {showCourseTestsEmpty && (
+                <div className="course-tests-panel course-tests-note">
+                  <div className="course-tests-title">{t('grades.courseTestsTitle')}</div>
+                  <p>{t('grades.courseTestsEmpty')}</p>
+                </div>
+              )}
+              {courseTests.length > 0 && (
+                <div className="course-tests-panel">
+                  <div className="course-tests-head">
+                    <div>
+                      <div className="course-tests-title">{t('grades.courseTestsTitle')}</div>
+                      <div className="course-tests-subtitle">{t('grades.courseTestsSubtitle')}</div>
+                    </div>
+                    <span className="course-tests-count">{courseTests.length}</span>
+                  </div>
+                  <div className="course-tests-list">
+                    {courseTests.map((test) => (
+                      <article key={`${test.rootId}-${test.courseId}`} className="course-test-card">
+                        <div className="course-test-card-head">
+                          <div>
+                            <div className="course-test-course">{test.courseName || t('grades.subject')}</div>
+                            <div className="course-test-name">{test.testName}</div>
+                          </div>
+                        </div>
+                        <div className="course-test-scores">
+                          {test.scores.map((score) => (
+                            <div key={`${test.rootId}-${score.id}`} className="course-test-score-row">
+                              <div className="course-test-score-copy">
+                                <div className="course-test-score-name">{score.name}</div>
+                                {(score.date || score.comment) && (
+                                  <div className="course-test-score-meta">
+                                    {[score.date, score.comment].filter(Boolean).join(' · ')}
+                                  </div>
+                                )}
+                              </div>
+                              <span className={`course-test-score-pill ${score.type}`}>
+                                {formatCourseTestScore(score)}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      </article>
+                    ))}
+                  </div>
                 </div>
               )}
             </div>
@@ -851,6 +948,9 @@ interface InfoScreenProps {
   history: StudyHistoryItem[];
   els: ElsCard | null;
   calendarEvents: CalendarEvent[];
+  credits: CreditSummary | null;
+  surveys: SurveyItem[];
+  surveysMissingScopes: string[];
 }
 
 export function InfoScreen({
@@ -866,9 +966,15 @@ export function InfoScreen({
   history,
   els,
   calendarEvents,
+  credits,
+  surveys,
+  surveysMissingScopes,
 }: InfoScreenProps) {
   const hasSideColumn = !!session || studies.length > 0;
   const showInfoSkeleton = infoLoading && !details && history.length === 0 && !els && calendarEvents.length === 0;
+  const showSurveysCard = surveys.length > 0
+    || hasMissingScope(surveysMissingScopes, 'surveys_filling')
+    || (!infoLoading && !!details);
 
   return (
     <section className={`screen info-screen${hasSideColumn ? '' : ' info-screen-full'}`}>
@@ -928,6 +1034,21 @@ export function InfoScreen({
               ))}
             </div>
           )}
+          {credits && (credits.programmeUsed !== null || credits.overallUsed !== null) && (
+            <div className="info-card ects-card">
+              <div className="info-card-head">{t('info.ectsProgress')}</div>
+              <div className="ects-metrics">
+                <div className="ects-metric">
+                  <div className="metric-label">{t('info.ectsProgramme')}</div>
+                  <div className="metric-value">{formatNullableNumber(credits.programmeUsed)} ECTS</div>
+                </div>
+                <div className="ects-metric">
+                  <div className="metric-label">{t('info.ectsOverall')}</div>
+                  <div className="metric-value">{formatNullableNumber(credits.overallUsed)} ECTS</div>
+                </div>
+              </div>
+            </div>
+          )}
           {history.length > 0 && (
             <div className="info-card info-history-card">
               <div className="info-card-head">{t('info.studyHistory')}</div>
@@ -937,6 +1058,34 @@ export function InfoScreen({
                   <span className="history-status">{h.status}</span>
                 </div>
               ))}
+            </div>
+          )}
+
+          {showSurveysCard && (
+            <div className="info-card surveys-card">
+              <div className="info-card-head">{t('info.surveysTitle')}</div>
+              {hasMissingScope(surveysMissingScopes, 'surveys_filling') ? (
+                <div className="info-inline-note">{t('info.surveysNeedsLogin')}</div>
+              ) : surveys.length === 0 ? (
+                <div className="info-inline-note">{t('info.surveysEmpty')}</div>
+              ) : (
+                surveys.map((survey) => (
+                  <div key={survey.id} className="survey-row">
+                    <div className="survey-main">
+                      <div className="survey-title">{survey.title}</div>
+                      <div className="survey-meta">
+                        {[survey.type, survey.courseName, survey.lecturerName, survey.endDate ? `${t('info.surveyUntil')} ${survey.endDate}` : ''].filter(Boolean).join(' · ')}
+                      </div>
+                      {survey.headlineHtml && (
+                        <div className="survey-headline" dangerouslySetInnerHTML={{ __html: survey.headlineHtml }} />
+                      )}
+                    </div>
+                    <span className={`survey-status ${survey.canFillOut ? 'open' : 'done'}`}>
+                      {survey.canFillOut ? t('info.surveyOpen') : t('info.surveyDone')}
+                    </span>
+                  </div>
+                ))
+              )}
             </div>
           )}
 

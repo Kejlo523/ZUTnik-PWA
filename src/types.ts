@@ -100,6 +100,48 @@ export interface StudyHistoryItem {
   status: string;
 }
 
+export interface CreditSummary {
+  studentProgrammeId: string;
+  programmeUsed: number | null;
+  overallUsed: number | null;
+}
+
+export interface SurveyItem {
+  id: string;
+  title: string;
+  type: string;
+  startDate: string;
+  endDate: string;
+  canFillOut: boolean;
+  didFillOut: boolean;
+  headlineHtml: string;
+  courseName: string;
+  lecturerName: string;
+  facultyName: string;
+  programmeName: string;
+}
+
+export interface CourseTestScore {
+  id: string;
+  name: string;
+  type: 'points' | 'grade';
+  value: string;
+  points: number | null;
+  maxPoints: number | null;
+  date: string;
+  comment: string;
+}
+
+export interface CourseTest {
+  id: string;
+  rootId: string;
+  courseId: string;
+  termId: string;
+  courseName: string;
+  testName: string;
+  scores: CourseTestScore[];
+}
+
 export interface NewsItem {
   id: number;
   title: string;

@@ -19,12 +19,15 @@ import {
   REQUIRED_USOS_SCOPES,
   asArray,
   firstNonEmpty,
+  mapCourseTests,
+  mapCreditSummary,
   mapFinanceRecords,
   mapGrades,
   mapInfoPayload,
   mapNewsItems,
   mapSemesters,
   mapStudentProgramme,
+  mapSurveyItems,
   mapUserProfile,
   missingRequiredScopes,
   normalizeScopeList,
@@ -42,6 +45,7 @@ const PLAN_SUGGEST_BASE = 'https://plan.zut.edu.pl/schedule.php';
 const RSS_URL = 'https://www.zut.edu.pl/rssfeed-studenci';
 const USOS_LOGIN_SCOPES = REQUIRED_USOS_SCOPES.join('|');
 const USOS_TOKEN_TTL_MS = 2 * 60 * 60 * 1000;
+const USOS_LONG_LIVED_SCOPE = 'offline_access';
 const REQUEST_TIMEOUT_MS = 20_000;
 const APP_BASE_PATH = (() => {
   const raw = String(process.env.VITE_APP_BASE || '/v2').trim();
@@ -531,9 +535,13 @@ const PROGRAMME_MIN_FIELDS = 'id|programme|status|admission_date|is_primary|stag
 const COURSE_FIELDS = 'course_editions[course_id|course_name|term_id]|terms';
 const COURSE_WITH_GRADES_FIELDS = 'course_editions[course_id|course_name|term_id|grades[value_symbol|passes|value_description|exam_id|exam_session_number|date_modified|date_acquisition]]|terms';
 const GRADE_FIELDS = 'value_symbol|passes|value_description|exam_id|exam_session_number|date_modified|date_acquisition|counts_into_average|grade_type_id';
-const PAYMENT_FIELDS = 'id|saldo_amount|description|state|account_number|payment_deadline|total_amount|currency|debt_type|type|faculty';
+const PAYMENT_FIELDS = 'id|saldo_amount|description|state|account_number|payment_deadline|total_amount|currency|debt_type|type';
 const CALENDAR_FIELDS = 'id|name|start_date|end_date|type|is_day_off';
 const NEWS_FIELDS = 'items[article[id|publication_date|title|headline_html|content_html|image_urls[720x405|360x203|original]]]|next_page|total';
+const SURVEY_FIELDS = 'id|survey_type|name|headline_html|start_date|end_date|can_i_fill_out|did_i_fill_out|group[course_unit[course_id|course_name|course[id|name]]]|lecturer[id|first_name|last_name]|faculty[id|name]|programme[id|name]';
+const CRSTEST_PARTICIPANT_FIELDS = 'course_edition[course_id|course_name|term_id|course[id|name]]|root[node_id|name|type]';
+const CRSTEST_NODE_FIELDS = 'node_id|root_id|parent_id|order|name|visible_for_students|type|points_min|points_max|points_precision|grade_type|subnodes';
+const CRSTEST_NODE_FALLBACK_FIELDS = 'node_id|root_id|parent_id|order|name|visible_for_students|type|subnodes';
 
 async function fetchStudentProgrammesRaw(token, secret) {
   const baseParams = {
@@ -622,6 +630,116 @@ async function fetchCourseEditionGradesByCourse(token, secret, termId, courseIds
   return {
     [termId]: Object.fromEntries(pairs.filter(([, data]) => data)),
   };
+}
+
+function hasUsosScope(scopes, scope) {
+  return normalizeScopeList(scopes).includes(scope);
+}
+
+async function fetchParticipantCourseTests(token, secret) {
+  for (const fields of [CRSTEST_PARTICIPANT_FIELDS, 'course_edition|is_limited_to_groups|class_groups|root']) {
+    try {
+      return await fetchUsosJson('services/crstests/participant2', {
+        token,
+        secret,
+        tokenMode: 'required',
+        params: {
+          active_terms_only: 'false',
+          fields,
+        },
+      });
+    } catch {
+      // ZUT may reject nested selectors in this module; fall back to the default shape.
+    }
+  }
+  return [];
+}
+
+function rootNodeId(test) {
+  const root = test?.root && typeof test.root === 'object' ? test.root : {};
+  return firstNonEmpty(root?.node_id, root?.id);
+}
+
+function collectCourseTestNodeIds(tree) {
+  const taskNodeIds = [];
+  const gradeNodeIds = [];
+  const visit = (node) => {
+    if (!node || typeof node !== 'object') return;
+    const id = firstNonEmpty(node.node_id, node.id);
+    const type = firstNonEmpty(node.type).toLowerCase();
+    if (id && type === 'task') taskNodeIds.push(id);
+    if (id && type === 'grade') gradeNodeIds.push(id);
+    for (const child of asArray(node.subnodes)) visit(child);
+  };
+  visit(tree);
+  return { taskNodeIds, gradeNodeIds };
+}
+
+async function fetchCourseTestNodeTree(token, secret, rootId) {
+  for (const fields of [CRSTEST_NODE_FIELDS, CRSTEST_NODE_FALLBACK_FIELDS]) {
+    try {
+      return await fetchUsosJson('services/crstests/node2', {
+        token,
+        secret,
+        tokenMode: 'required',
+        params: {
+          node_id: rootId,
+          recursive: 'true',
+          fields,
+        },
+      });
+    } catch {
+      // Retry with a smaller selector.
+    }
+  }
+  return null;
+}
+
+async function fetchCourseTestResultsForRoot(token, secret, rootId, tree) {
+  const { taskNodeIds, gradeNodeIds } = collectCourseTestNodeIds(tree);
+  const [points, grades] = await Promise.all([
+    taskNodeIds.length
+      ? fetchUsosJson('services/crstests/user_points', {
+          token,
+          secret,
+          tokenMode: 'required',
+          params: { node_ids: taskNodeIds.join('|') },
+        }).catch(() => [])
+      : [],
+    gradeNodeIds.length
+      ? fetchUsosJson('services/crstests/user_grades', {
+          token,
+          secret,
+          tokenMode: 'required',
+          params: { node_ids: gradeNodeIds.join('|') },
+        }).catch(() => [])
+      : [],
+  ]);
+
+  return [rootId, { points, grades }];
+}
+
+async function fetchCourseTestsPayload(token, secret, termId) {
+  const tests = asArray(await fetchParticipantCourseTests(token, secret));
+  const rootIds = [...new Set(tests.map(rootNodeId).filter(Boolean))];
+  const treePairs = await Promise.all(rootIds.map(async (rootId) => {
+    const tree = await fetchCourseTestNodeTree(token, secret, rootId);
+    return [rootId, tree];
+  }));
+  const nodeTreesByRootId = Object.fromEntries(treePairs.filter(([, tree]) => tree));
+
+  const resultPairs = await Promise.all(Object.entries(nodeTreesByRootId).map(([rootId, tree]) => (
+    fetchCourseTestResultsForRoot(token, secret, rootId, tree)
+  )));
+
+  const pointsByRootId = {};
+  const gradesByRootId = {};
+  for (const [rootId, result] of resultPairs) {
+    pointsByRootId[rootId] = result.points;
+    gradesByRootId[rootId] = result.grades;
+  }
+
+  return mapCourseTests({ tests, nodeTreesByRootId, pointsByRootId, gradesByRootId, termId });
 }
 
 function addDaysIso(days) {
@@ -753,12 +871,13 @@ app.post('/api/usos/access-token', async (req, res) => {
     }
 
     const authorizedAt = Date.now();
+    const hasLongLivedAccess = normalizeScopeList(scopes).includes(USOS_LONG_LIVED_SCOPE);
     statsService.recordSuccessfulLogin(req, 'usos');
     return res.json({
       ...result,
       scopes,
       authorizedAt,
-      expiresAt: authorizedAt + USOS_TOKEN_TTL_MS,
+      ...(hasLongLivedAccess ? {} : { expiresAt: authorizedAt + USOS_TOKEN_TTL_MS }),
     });
   } catch (error) {
     return sendUsosError(res, error);
@@ -878,6 +997,50 @@ app.post('/api/usos/grades', async (req, res) => {
   }
 });
 
+app.post('/api/usos/credits', async (req, res) => {
+  try {
+    const { token, secret } = getUsosCredentials(req);
+    const studentProgrammeId = firstNonEmpty(req.body?.studyId);
+    const [programmeUsed, overallUsed] = await Promise.all([
+      studentProgrammeId && studentProgrammeId !== 'usos-profile'
+        ? fetchUsosJson('services/credits/used_sum', {
+            token,
+            secret,
+            tokenMode: 'required',
+            params: { students_programme_id: studentProgrammeId },
+          }).catch(() => null)
+        : null,
+      fetchUsosJson('services/credits/used_sum', {
+        token,
+        secret,
+        tokenMode: 'required',
+      }).catch(() => null),
+    ]);
+
+    return res.json({
+      summary: mapCreditSummary({ studentProgrammeId, programmeUsed, overallUsed }),
+    });
+  } catch (error) {
+    return sendUsosError(res, error);
+  }
+});
+
+app.post('/api/usos/course-tests', async (req, res) => {
+  try {
+    const scopes = normalizeScopeList(req.body?.scopes);
+    if (!hasUsosScope(scopes, 'crstests')) {
+      return res.json({ tests: [], missingScopes: ['crstests'] });
+    }
+
+    const { token, secret } = getUsosCredentials(req);
+    const termId = firstNonEmpty(req.body?.termId);
+    const tests = await fetchCourseTestsPayload(token, secret, termId);
+    return res.json({ tests, missingScopes: [] });
+  } catch (error) {
+    return sendUsosError(res, error);
+  }
+});
+
 app.post('/api/usos/finance', async (req, res) => {
   try {
     const { token, secret } = getUsosCredentials(req);
@@ -957,6 +1120,42 @@ app.post('/api/usos/info', async (req, res) => {
       calendarEvents,
       activeTerm,
     }));
+  } catch (error) {
+    return sendUsosError(res, error);
+  }
+});
+
+app.post('/api/usos/surveys', async (req, res) => {
+  try {
+    const scopes = normalizeScopeList(req.body?.scopes);
+    if (!hasUsosScope(scopes, 'surveys_filling')) {
+      return res.json({ items: [], missingScopes: ['surveys_filling'] });
+    }
+
+    const { token, secret } = getUsosCredentials(req);
+    let surveys = [];
+    try {
+      surveys = await fetchUsosJson('services/surveys/surveys_to_fill2', {
+        token,
+        secret,
+        tokenMode: 'required',
+        params: {
+          include_filled_out: 'false',
+          fields: SURVEY_FIELDS,
+        },
+      });
+    } catch {
+      surveys = await fetchUsosJson('services/surveys/surveys_to_fill2', {
+        token,
+        secret,
+        tokenMode: 'required',
+        params: {
+          include_filled_out: 'false',
+        },
+      });
+    }
+
+    return res.json({ items: mapSurveyItems(surveys), missingScopes: [] });
   } catch (error) {
     return sendUsosError(res, error);
   }

@@ -1,5 +1,7 @@
 import type {
   CalendarEvent,
+  CourseTest,
+  CreditSummary,
   ElsCard,
   FinanceSnapshot,
   Grade,
@@ -10,6 +12,7 @@ import type {
   Study,
   StudyDetails,
   StudyHistoryItem,
+  SurveyItem,
 } from '../types';
 
 const SESSION_KEY = 'zutnik_pwa_session';
@@ -148,6 +151,7 @@ const TTL_MS = {
   studies: 15 * 60_000,
   semesters: 15 * 60_000,
   grades: 10 * 60_000,
+  courseTests: 10 * 60_000,
   finance: 4 * 60 * 60_000,
   info: 15 * 60_000,
   plan: 5 * 60_000,
@@ -204,17 +208,22 @@ export const cache = {
   loadGrades: (semId: string): Grade[] | null => loadC(ck('grades', semId), TTL_MS.grades),
   loadGradesForce: (semId: string): Grade[] | null => loadCForce(ck('grades', semId)),
 
+  // Course tests per semester
+  saveCourseTests: (semId: string, data: { tests: CourseTest[]; missingScopes?: string[] }) => saveC(ck('course_tests', semId), data),
+  loadCourseTests: (semId: string): { tests: CourseTest[]; missingScopes?: string[] } | null => loadC(ck('course_tests', semId), TTL_MS.courseTests),
+  loadCourseTestsForce: (semId: string): { tests: CourseTest[]; missingScopes?: string[] } | null => loadCForce(ck('course_tests', semId)),
+
   // Finance per study
   saveFinance: (studyId: string, data: FinanceSnapshot) => saveC(ck('finance', studyId), data),
   loadFinance: (studyId: string): FinanceSnapshot | null => loadC(ck('finance', studyId), TTL_MS.finance),
   loadFinanceForce: (studyId: string): FinanceSnapshot | null => loadCForce(ck('finance', studyId)),
 
   // Info per study
-  saveInfo: (studyId: string, data: { details: StudyDetails | null; history: StudyHistoryItem[]; els?: ElsCard | null; calendarEvents?: CalendarEvent[] }) =>
+  saveInfo: (studyId: string, data: { details: StudyDetails | null; history: StudyHistoryItem[]; els?: ElsCard | null; calendarEvents?: CalendarEvent[]; credits?: CreditSummary | null; surveys?: SurveyItem[]; surveysMissingScopes?: string[] }) =>
     saveC(ck('info', studyId), data),
-  loadInfo: (studyId: string): { details: StudyDetails | null; history: StudyHistoryItem[]; els?: ElsCard | null; calendarEvents?: CalendarEvent[] } | null =>
+  loadInfo: (studyId: string): { details: StudyDetails | null; history: StudyHistoryItem[]; els?: ElsCard | null; calendarEvents?: CalendarEvent[]; credits?: CreditSummary | null; surveys?: SurveyItem[]; surveysMissingScopes?: string[] } | null =>
     loadC(ck('info', studyId), TTL_MS.info),
-  loadInfoForce: (studyId: string): { details: StudyDetails | null; history: StudyHistoryItem[]; els?: ElsCard | null; calendarEvents?: CalendarEvent[] } | null =>
+  loadInfoForce: (studyId: string): { details: StudyDetails | null; history: StudyHistoryItem[]; els?: ElsCard | null; calendarEvents?: CalendarEvent[]; credits?: CreditSummary | null; surveys?: SurveyItem[]; surveysMissingScopes?: string[] } | null =>
     loadCForce(ck('info', studyId)),
 
   // Plan (keyed by viewMode+date+studyId)

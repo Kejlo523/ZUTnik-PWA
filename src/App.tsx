@@ -2,6 +2,8 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import './App.css';
 import type {
   CalendarEvent,
+  CourseTest,
+  CreditSummary,
   ElsCard,
   FinanceSnapshot,
   Grade,
@@ -14,6 +16,7 @@ import type {
   Study,
   StudyDetails,
   StudyHistoryItem,
+  SurveyItem,
   ViewMode,
 } from './types';
 import {
@@ -21,6 +24,8 @@ import {
   fetchCombinedGrades,
   fetchCombinedSemesters,
   fetchCombinedStudies,
+  fetchCourseTests,
+  fetchCreditSummary,
   fetchFinance,
   fetchInfo,
   fetchNews,
@@ -29,6 +34,7 @@ import {
   fetchPlanSuggestions,
   fetchPlanWindow,
   fetchStudentPhotoBlob,
+  fetchSurveysToFill,
   fetchUsosRequestToken,
   isSessionExpiredError,
   loginWithUsos,
@@ -269,6 +275,9 @@ function App() {
   const [grades, setGrades] = useState<Grade[]>([]);
   const [gradesLoading, setGradesLoad] = useState(false);
   const [totalEctsAll, setTotalEctsAll] = useState(0);
+  const [courseTests, setCourseTests] = useState<CourseTest[]>([]);
+  const [courseTestsLoading, setCourseTestsLoading] = useState(false);
+  const [courseTestsMissingScopes, setCourseTestsMissingScopes] = useState<string[]>([]);
   const [expandedGradeSubjects, setExpandedGradeSubjects] = useState<Record<string, boolean>>({});
   const selSemPrev = useRef('');
   const planRequestIdRef = useRef<string>('');
@@ -284,6 +293,9 @@ function App() {
   const [history, setHistory] = useState<StudyHistoryItem[]>([]);
   const [els, setEls] = useState<ElsCard | null>(null);
   const [calendarEvents, setCalendarEvents] = useState<CalendarEvent[]>([]);
+  const [credits, setCredits] = useState<CreditSummary | null>(null);
+  const [surveys, setSurveys] = useState<SurveyItem[]>([]);
+  const [surveysMissingScopes, setSurveysMissingScopes] = useState<string[]>([]);
   const [infoLoading, setInfoLoading] = useState(false);
   const [studentPhotoError, setStudentPhotoError] = useState(false);
 
@@ -294,6 +306,17 @@ function App() {
   const activeStudyId = session?.activeStudyId ?? studies[0]?.przynaleznoscId ?? null;
   const hasMultipleUsosProgrammes = studies.length > 1;
   const canOpenStats = useMemo(() => normalizeStatsAlbum(session?.userId) === STATS_OWNER_ALBUM, [session?.userId]);
+  const sessionScopes = useMemo(() => session?.usos?.scopes ?? [], [session?.usos?.scopes]);
+  const effectiveCourseTestsMissingScopes = useMemo(() => {
+    const missing = new Set(courseTestsMissingScopes);
+    if (session && !sessionScopes.includes('crstests')) missing.add('crstests');
+    return [...missing];
+  }, [courseTestsMissingScopes, session, sessionScopes]);
+  const effectiveSurveysMissingScopes = useMemo(() => {
+    const missing = new Set(surveysMissingScopes);
+    if (session && !sessionScopes.includes('surveys_filling')) missing.add('surveys_filling');
+    return [...missing];
+  }, [surveysMissingScopes, session, sessionScopes]);
   const currentPlanAlbum = useMemo(() => (planResult?.debug.album || '').trim(), [planResult?.debug.album]);
   const hiddenPlanSubjectKeys = useMemo(() => (
     currentPlanAlbum ? (planHiddenSubjectKeysByAlbum[currentPlanAlbum] ?? []) : []
@@ -986,12 +1009,46 @@ function App() {
     };
   }, [screen, planSearchOpen, planSearchQ, resetPlanSearch]);
 
+  const loadCourseTestsData = useCallback(async (semesterId: string, forceRefresh = false) => {
+    if (!session || !semesterId) {
+      setCourseTests([]);
+      setCourseTestsMissingScopes([]);
+      return;
+    }
+
+    const cached = cache.loadCourseTestsForce(semesterId);
+    if (cached && !forceRefresh) {
+      setCourseTests(cached.tests ?? []);
+      setCourseTestsMissingScopes(cached.missingScopes ?? []);
+    }
+
+    if (cache.loadCourseTests(semesterId) && !forceRefresh) return;
+
+    setCourseTestsLoading(true);
+    try {
+      const payload = await fetchCourseTests(session, semesterId);
+      cache.saveCourseTests(semesterId, payload);
+      setCourseTests(payload.tests);
+      setCourseTestsMissingScopes(payload.missingScopes);
+    } catch (e) {
+      if (handleSessionError(e)) return;
+      if (!cached) {
+        setCourseTests([]);
+        setCourseTestsMissingScopes([]);
+      }
+    } finally {
+      setCourseTestsLoading(false);
+    }
+  }, [session, handleSessionError]);
+
   const loadGradesData = useCallback(async (resetSemId = false, forceRefresh = false) => {
     if (!session || !activeStudyId) {
       setSemesters([]);
       setSelSemId('');
       setGrades([]);
       setTotalEctsAll(0);
+      setCourseTests([]);
+      setCourseTestsMissingScopes([]);
       return;
     }
 
@@ -1032,6 +1089,7 @@ function App() {
         cache.saveGrades(curSemId, fresh);
         setGrades(fresh);
       }
+      void loadCourseTestsData(curSemId, forceRefresh);
 
       const semFingerprint = safeSems.map(s => s.listaSemestrowId).join('|');
       const totalEctsCacheKey = `zutnik_usos_total_ects_${session.userId}_${activeStudyId}`;
@@ -1077,7 +1135,7 @@ function App() {
     } finally {
       setGradesLoad(false);
     }
-  }, [session, activeStudyId, selSemId, grades.length, ensureSessionStillValid, handleSessionError]);
+  }, [session, activeStudyId, selSemId, grades.length, ensureSessionStillValid, handleSessionError, loadCourseTestsData]);
 
   const loadFinanceData = useCallback(async (forceRefresh = false) => {
     if (!session || !activeStudyId) {
@@ -1120,17 +1178,36 @@ function App() {
       setHistory(forceCached.history);
       if (forceCached.els) setEls(forceCached.els);
       if (forceCached.calendarEvents) setCalendarEvents(forceCached.calendarEvents);
+      if ('credits' in forceCached) setCredits(forceCached.credits ?? null);
+      if (forceCached.surveys) setSurveys(forceCached.surveys);
+      if (forceCached.surveysMissingScopes) setSurveysMissingScopes(forceCached.surveysMissingScopes);
     }
     if (cache.loadInfo(activeStudyId) && !forceRefresh) return; // fresh cache, skip fetch
     setInfoLoading(true);
     setGlobalError('');
     try {
-      const payload = await fetchInfo(session, activeStudyId);
+      const [infoResult, creditsResult, surveysResult] = await Promise.allSettled([
+        fetchInfo(session, activeStudyId),
+        fetchCreditSummary(session, activeStudyId),
+        fetchSurveysToFill(session),
+      ]);
+
+      if (infoResult.status === 'rejected') throw infoResult.reason;
+
+      const payload = {
+        ...infoResult.value,
+        credits: creditsResult.status === 'fulfilled' ? creditsResult.value : null,
+        surveys: surveysResult.status === 'fulfilled' ? surveysResult.value.items : [],
+        surveysMissingScopes: surveysResult.status === 'fulfilled' ? surveysResult.value.missingScopes : [],
+      };
       cache.saveInfo(activeStudyId, payload);
       setDetails(payload.details);
       setHistory(payload.history);
       setEls(payload.els ?? null);
       setCalendarEvents(payload.calendarEvents ?? []);
+      setCredits(payload.credits ?? null);
+      setSurveys(payload.surveys ?? []);
+      setSurveysMissingScopes(payload.surveysMissingScopes ?? []);
     } catch (e) {
       if (handleSessionError(e)) return;
       if (!forceCached) setGlobalError(e instanceof Error ? e.message : 'Nie można pobrać danych.');
@@ -1186,11 +1263,16 @@ function App() {
     setSemesters([]);
     setGrades([]);
     setTotalEctsAll(0);
+    setCourseTests([]);
+    setCourseTestsMissingScopes([]);
     setFinanceSnapshot({ ...EMPTY_FINANCE_SNAPSHOT });
     setDetails(null);
     setHistory([]);
     setEls(null);
     setCalendarEvents([]);
+    setCredits(null);
+    setSurveys([]);
+    setSurveysMissingScopes([]);
     setPlanResult(null);
     setSelectedPlanEvent(null);
 
@@ -1217,6 +1299,7 @@ function App() {
             const g = await fetchCombinedGrades(session, selSemId);
             cache.saveGrades(selSemId, g);
             setGrades(g);
+            void loadCourseTestsData(selSemId);
           } catch (e) {
             handleSessionError(e);
           } finally {
@@ -1226,9 +1309,10 @@ function App() {
       } else {
         const cached = cache.loadGradesForce(selSemId);
         if (cached) setGrades(cached);
+        void loadCourseTestsData(selSemId);
       }
     }
-  }, [selSemId, screen, session, ensureSessionStillValid, handleSessionError]);
+  }, [selSemId, screen, session, ensureSessionStillValid, handleSessionError, loadCourseTestsData]);
 
   // ── Computed values ───────────────────────────────────────────────────────
 
@@ -2218,6 +2302,9 @@ function App() {
         grades={grades}
         settings={settings}
         groupedGrades={groupedGrades}
+        courseTests={courseTests}
+        courseTestsLoading={courseTestsLoading}
+        courseTestsMissingScopes={effectiveCourseTestsMissingScopes}
         expandedGradeSubjects={expandedGradeSubjects}
         setExpandedGradeSubjects={setExpandedGradeSubjects}
         hasProgrammeSplitNotice={hasMultipleUsosProgrammes}
@@ -2256,6 +2343,9 @@ function App() {
         history={history}
         els={els}
         calendarEvents={calendarEvents}
+        credits={credits}
+        surveys={surveys}
+        surveysMissingScopes={effectiveSurveysMissingScopes}
       />
     );
   }

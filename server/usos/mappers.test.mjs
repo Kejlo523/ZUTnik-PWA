@@ -1,11 +1,14 @@
 import assert from 'node:assert/strict';
 import {
+  mapCourseTests,
+  mapCreditSummary,
   mapFinanceRecords,
   mapGrades,
   mapInfoPayload,
   mapNewsItems,
   mapSemesters,
   mapStudentProgramme,
+  mapSurveyItems,
   missingRequiredScopes,
   sanitizeHtml,
 } from './mappers.mjs';
@@ -21,8 +24,8 @@ function test(name, fn) {
 }
 
 test('validates required OAuth scopes exactly', () => {
-  assert.deepEqual(missingRequiredScopes('studies|grades|payments|cards|photo'), []);
-  assert.deepEqual(missingRequiredScopes('studies|grades|photo'), ['payments', 'cards']);
+  assert.deepEqual(missingRequiredScopes('studies|grades|payments|cards|photo|crstests|surveys_filling|offline_access'), []);
+  assert.deepEqual(missingRequiredScopes('studies|grades|photo'), ['payments', 'cards', 'crstests', 'surveys_filling', 'offline_access']);
 });
 
 test('maps student programme id separately from programme id', () => {
@@ -163,6 +166,79 @@ test('keeps fallback student details visible without programme data', () => {
   assert.equal(payload.details.album, '57796');
   assert.equal(payload.details.kierunek, '');
   assert.deepEqual(payload.history, []);
+});
+
+test('maps ECTS credit summary', () => {
+  const summary = mapCreditSummary({
+    studentProgrammeId: '130712',
+    programmeUsed: '73',
+    overallUsed: '91.5',
+  });
+
+  assert.equal(summary.studentProgrammeId, '130712');
+  assert.equal(summary.programmeUsed, 73);
+  assert.equal(summary.overallUsed, 91.5);
+});
+
+test('maps and sanitizes surveys to fill', () => {
+  const surveys = mapSurveyItems([
+    {
+      id: 'survey-1',
+      survey_type: 'course',
+      name: { pl: 'Ankieta zajęć' },
+      headline_html: { pl: '<p>Wypełnij <strong>krótko</strong><script>x()</script></p>' },
+      end_date: '2026-06-01 12:00:00',
+      can_i_fill_out: true,
+      group: {
+        course_unit: {
+          course: { name: { pl: 'Algorytmy' } },
+        },
+      },
+      lecturer: { first_name: 'Jan', last_name: 'Kowalski' },
+    },
+  ]);
+
+  assert.equal(surveys.length, 1);
+  assert.equal(surveys[0].title, 'Ankieta zajęć');
+  assert.equal(surveys[0].courseName, 'Algorytmy');
+  assert.equal(surveys[0].lecturerName, 'Jan Kowalski');
+  assert.equal(surveys[0].headlineHtml.includes('<script'), false);
+});
+
+test('maps course test points and grades', () => {
+  const tests = mapCourseTests({
+    termId: '2025Z',
+    tests: [
+      {
+        id: 'test-1',
+        course_edition: { course_id: 'ALG', course_name: { pl: 'Algorytmy' }, term_id: '2025Z' },
+        root: { node_id: 'r1', name: { pl: 'Kolokwia' }, type: 'root' },
+      },
+    ],
+    nodeTreesByRootId: {
+      r1: {
+        node_id: 'r1',
+        name: { pl: 'Kolokwia' },
+        type: 'root',
+        subnodes: [
+          { node_id: 'p1', name: { pl: 'Kolokwium 1' }, type: 'task', order: 1, points_max: 20 },
+          { node_id: 'g1', name: { pl: 'Ocena' }, type: 'grade', order: 2 },
+        ],
+      },
+    },
+    pointsByRootId: {
+      r1: [{ node_id: 'p1', points: '17.5', comment: 'OK', last_changed: '2026-01-01 10:00:00' }],
+    },
+    gradesByRootId: {
+      r1: [{ node_id: 'g1', grade: { value_symbol: '4.5' } }],
+    },
+  });
+
+  assert.equal(tests.length, 1);
+  assert.equal(tests[0].courseName, 'Algorytmy');
+  assert.equal(tests[0].scores.length, 2);
+  assert.equal(tests[0].scores[0].points, 17.5);
+  assert.equal(tests[0].scores[1].value, '4.5');
 });
 
 test('sanitizes dangerous news HTML', () => {

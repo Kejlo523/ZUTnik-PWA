@@ -68,6 +68,10 @@ const pl: Record<string, string> = {
     'grades.ects': 'ECTS',
     'grades.enableGrouping': 'Włącz grupowanie',
     'grades.disableGrouping': 'Wyłącz grupowanie',
+    'grades.courseTestsTitle': 'Oceny cząstkowe i punkty',
+    'grades.courseTestsSubtitle': 'Dane z modułu crstests w USOS',
+    'grades.courseTestsNeedsLogin': 'Zaloguj się ponownie przez USOS, żeby udzielić zgody na moduł crstests.',
+    'grades.courseTestsEmpty': 'Brak ocen cząstkowych lub punktów w USOS dla wybranego semestru.',
 
     // Finance
     'finance.title': 'Finanse',
@@ -117,6 +121,17 @@ const pl: Record<string, string> = {
     'finance.lineBalance': 'Saldo: {{value}}',
     'finance.lineAccount': 'Konto: {{value}}',
     'finance.recordFallback': 'Pozycja finansowa',
+
+    // Student info extras
+    'info.ectsProgress': 'Postęp ECTS',
+    'info.ectsProgramme': 'Wybrany kierunek',
+    'info.ectsOverall': 'Ogółem',
+    'info.surveysTitle': 'Ankiety do wypełnienia',
+    'info.surveysNeedsLogin': 'Zaloguj się ponownie przez USOS, żeby udzielić zgody na ankiety.',
+    'info.surveysEmpty': 'Brak ankiet do wypełnienia.',
+    'info.surveyUntil': 'do',
+    'info.surveyOpen': 'Do wypełnienia',
+    'info.surveyDone': 'Zamknięta',
 
     // Settings
     'settings.refresh': 'Odświeżanie',
@@ -360,6 +375,10 @@ const en: Record<string, string> = {
     'grades.ects': 'ECTS',
     'grades.enableGrouping': 'Enable grouping',
     'grades.disableGrouping': 'Disable grouping',
+    'grades.courseTestsTitle': 'Partial grades and points',
+    'grades.courseTestsSubtitle': 'Data from the USOS crstests module',
+    'grades.courseTestsNeedsLogin': 'Log in through USOS again to grant access to the crstests module.',
+    'grades.courseTestsEmpty': 'No partial grades or points in USOS for the selected semester.',
 
     // Finance
     'finance.title': 'Finance',
@@ -409,6 +428,17 @@ const en: Record<string, string> = {
     'finance.lineBalance': 'Balance: {{value}}',
     'finance.lineAccount': 'Account: {{value}}',
     'finance.recordFallback': 'Finance item',
+
+    // Student info extras
+    'info.ectsProgress': 'ECTS progress',
+    'info.ectsProgramme': 'Selected programme',
+    'info.ectsOverall': 'Overall',
+    'info.surveysTitle': 'Surveys to fill',
+    'info.surveysNeedsLogin': 'Log in through USOS again to grant survey access.',
+    'info.surveysEmpty': 'No surveys to fill.',
+    'info.surveyUntil': 'until',
+    'info.surveyOpen': 'To fill',
+    'info.surveyDone': 'Closed',
 
     // Settings
     'settings.refresh': 'Refresh',

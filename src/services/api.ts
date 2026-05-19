@@ -1,5 +1,7 @@
 import type {
   CalendarEvent,
+  CourseTest,
+  CreditSummary,
   ElsCard,
   FinanceRecord,
   Grade,
@@ -11,6 +13,7 @@ import type {
   Study,
   StudyDetails,
   StudyHistoryItem,
+  SurveyItem,
   UsosSessionData,
   ViewMode,
 } from '../types';
@@ -20,7 +23,7 @@ import { loadOrCreateDeviceId } from './storage';
 const API_BASE = import.meta.env.VITE_API_BASE ?? (import.meta.env.DEV ? '/api' : `${import.meta.env.BASE_URL}api`);
 const DEVICE_ID = loadOrCreateDeviceId();
 const SESSION_EXPIRED_MESSAGE = 'Sesja wygasła, zaloguj się ponownie';
-const USOS_LOGIN_SCOPES = 'studies|grades|payments|cards|photo';
+const USOS_LOGIN_SCOPES = 'studies|grades|payments|cards|photo|crstests|surveys_filling|offline_access';
 
 interface UsosProfileUser {
   id?: string | number;
@@ -130,6 +133,10 @@ function normalizeStringArray(value: unknown): string[] {
   return ensureArray<unknown>(value)
     .map((item) => firstNonEmpty(item))
     .filter(Boolean);
+}
+
+function hasUsosScope(session: SessionData, scope: string): boolean {
+  return Boolean(session.usos?.scopes?.includes(scope));
 }
 
 async function postUsosEndpoint<T>(usos: UsosSessionData, path: string, payload: Record<string, unknown> = {}): Promise<T> {
@@ -391,6 +398,26 @@ export async function fetchCombinedGrades(session: SessionData, semesterId: stri
   return fetchGrades(session, semesterId);
 }
 
+export async function fetchCourseTests(
+  session: SessionData,
+  semesterId: string,
+): Promise<{ tests: CourseTest[]; missingScopes: string[] }> {
+  if (!session.usos || !hasUsosScope(session, 'crstests')) {
+    return { tests: [], missingScopes: ['crstests'] };
+  }
+
+  const body = await postUsosEndpoint<{ tests?: CourseTest[]; missingScopes?: string[] }>(
+    session.usos,
+    '/usos/course-tests',
+    { termId: semesterId },
+  );
+
+  return {
+    tests: ensureArray<CourseTest>(body.tests),
+    missingScopes: normalizeStringArray(body.missingScopes),
+  };
+}
+
 export async function fetchFinance(session: SessionData, studyId: string | null): Promise<FinanceRecord[]> {
   void studyId;
   if (!session.usos) return [];
@@ -412,6 +439,24 @@ export async function fetchInfo(
     els?: ElsCard | null;
     calendarEvents?: CalendarEvent[];
   }>(session.usos, '/usos/info', { studyId });
+}
+
+export async function fetchCreditSummary(session: SessionData, studyId: string | null): Promise<CreditSummary | null> {
+  if (!session.usos) return null;
+  const body = await postUsosEndpoint<{ summary?: CreditSummary }>(session.usos, '/usos/credits', { studyId });
+  return body.summary ?? null;
+}
+
+export async function fetchSurveysToFill(session: SessionData): Promise<{ items: SurveyItem[]; missingScopes: string[] }> {
+  if (!session.usos || !hasUsosScope(session, 'surveys_filling')) {
+    return { items: [], missingScopes: ['surveys_filling'] };
+  }
+
+  const body = await postUsosEndpoint<{ items?: SurveyItem[]; missingScopes?: string[] }>(session.usos, '/usos/surveys');
+  return {
+    items: ensureArray<SurveyItem>(body.items),
+    missingScopes: normalizeStringArray(body.missingScopes),
+  };
 }
 
 async function fetchUsosNews(): Promise<NewsItem[]> {

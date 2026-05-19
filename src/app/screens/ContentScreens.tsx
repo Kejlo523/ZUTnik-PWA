@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type Dispatch, type MutableRefObject, type SetStateAction, type TouchEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type Dispatch, type MutableRefObject, type SetStateAction, type TouchEvent } from 'react';
 
 import type { NewsItem, UsefulLink } from '../../types';
 import type { AppSettings } from '../../services/storage';
@@ -208,10 +208,19 @@ interface NewsGalleryModalProps {
   onPrev: () => void;
 }
 
+type GallerySwipePhase = 'idle' | 'dragging' | 'settling';
+
 function NewsGalleryModal({ images, index, onClose, onNext, onPrev }: NewsGalleryModalProps) {
   const image = images[index];
   const [zoom, setZoom] = useState(1);
-  const touchStartRef = useRef<{ x: number; y: number } | null>(null);
+  const [swipeState, setSwipeState] = useState<{ dx: number; progress: number; phase: GallerySwipePhase; direction: -1 | 0 | 1 }>({
+    dx: 0,
+    progress: 0,
+    phase: 'idle',
+    direction: 0,
+  });
+  const touchStartRef = useRef<{ x: number; y: number; ts: number; width: number; locked: boolean } | null>(null);
+  const swipeCommitTimerRef = useRef<number | null>(null);
   const hasMany = images.length > 1;
 
   useEffect(() => {
@@ -225,18 +234,75 @@ function NewsGalleryModal({ images, index, onClose, onNext, onPrev }: NewsGaller
     return () => document.removeEventListener('keydown', onKeyDown);
   }, [hasMany, onClose, onNext, onPrev]);
 
+  useEffect(() => () => {
+    if (swipeCommitTimerRef.current !== null) {
+      window.clearTimeout(swipeCommitTimerRef.current);
+    }
+  }, []);
+
   if (!image) return null;
 
   const toggleZoom = () => {
     setZoom((current) => (current > 1 ? 1 : 2));
   };
 
+  const resetSwipe = () => {
+    setSwipeState({ dx: 0, progress: 0, phase: 'idle', direction: 0 });
+  };
+
+  const finishSwipe = (direction: -1 | 1) => {
+    if (swipeCommitTimerRef.current !== null) {
+      window.clearTimeout(swipeCommitTimerRef.current);
+    }
+
+    setSwipeState({ dx: 0, progress: 1, phase: 'settling', direction });
+    swipeCommitTimerRef.current = window.setTimeout(() => {
+      swipeCommitTimerRef.current = null;
+      resetSwipe();
+      if (direction > 0) onNext();
+      else onPrev();
+    }, 260);
+  };
+
   const onTouchStart = (event: TouchEvent<HTMLDivElement>) => {
-    if (event.touches.length !== 1) return;
+    if (event.touches.length !== 1 || !hasMany || zoom > 1) return;
+    if (swipeCommitTimerRef.current !== null) {
+      window.clearTimeout(swipeCommitTimerRef.current);
+      swipeCommitTimerRef.current = null;
+    }
+
+    const target = event.currentTarget;
     touchStartRef.current = {
       x: event.touches[0].clientX,
       y: event.touches[0].clientY,
+      ts: Date.now(),
+      width: Math.max(1, target.clientWidth),
+      locked: false,
     };
+    setSwipeState({ dx: 0, progress: 0, phase: 'dragging', direction: 0 });
+  };
+
+  const onTouchMove = (event: TouchEvent<HTMLDivElement>) => {
+    const start = touchStartRef.current;
+    if (!start || !hasMany || zoom > 1 || event.touches.length !== 1) return;
+
+    const rawDx = event.touches[0].clientX - start.x;
+    const dy = event.touches[0].clientY - start.y;
+    if (!start.locked) {
+      if (Math.abs(rawDx) < 8 && Math.abs(dy) < 8) return;
+      if (Math.abs(dy) > Math.abs(rawDx) * 1.15) {
+        touchStartRef.current = null;
+        resetSwipe();
+        return;
+      }
+      start.locked = true;
+    }
+
+    event.preventDefault();
+    const limit = start.width * 0.92;
+    const dx = Math.max(-limit, Math.min(limit, rawDx));
+    const progress = Math.min(1, Math.abs(dx) / Math.max(1, start.width * 0.42));
+    setSwipeState({ dx, progress, phase: 'dragging', direction: 0 });
   };
 
   const onTouchEnd = (event: TouchEvent<HTMLDivElement>) => {
@@ -246,14 +312,43 @@ function NewsGalleryModal({ images, index, onClose, onNext, onPrev }: NewsGaller
 
     const dx = event.changedTouches[0].clientX - start.x;
     const dy = event.changedTouches[0].clientY - start.y;
-    if (Math.abs(dx) < 52 || Math.abs(dx) < Math.abs(dy) * 1.25) return;
-    if (dx < 0) onNext();
-    else onPrev();
+    const elapsed = Math.max(1, Date.now() - start.ts);
+    const velocity = Math.abs(dx) / elapsed;
+    const threshold = Math.min(120, Math.max(56, start.width * 0.18));
+
+    if (!start.locked || Math.abs(dx) < Math.abs(dy) * 1.2 || (Math.abs(dx) < threshold && velocity < 0.45)) {
+      resetSwipe();
+      return;
+    }
+
+    finishSwipe(dx < 0 ? 1 : -1);
+  };
+
+  const onTouchCancel = () => {
+    touchStartRef.current = null;
+    resetSwipe();
   };
 
   const zoomedStyle = zoom > 1
     ? { width: `${zoom * 100}%`, maxWidth: 'none', maxHeight: 'none' }
     : undefined;
+  const canAnimateSwipe = hasMany && zoom === 1;
+  const getRelativeImage = (offset: number) => images[(index + offset + images.length) % images.length];
+  const swipeTrackTransform = swipeState.phase === 'settling'
+    ? (swipeState.direction > 0 ? 'translate3d(-200%, 0, 0)' : 'translate3d(0, 0, 0)')
+    : `translate3d(calc(-100% + ${Math.round(swipeState.dx)}px), 0, 0)`;
+  const swipeTrackStyle = {
+    '--gallery-active-scale': String(1 - swipeState.progress * 0.035),
+    '--gallery-active-opacity': String(1 - swipeState.progress * 0.1),
+    '--gallery-side-scale': String(0.96 + swipeState.progress * 0.04),
+    '--gallery-side-opacity': String(0.72 + swipeState.progress * 0.28),
+    transform: swipeTrackTransform,
+  } as CSSProperties;
+  const swipeTrackClass = [
+    'news-gallery-track',
+    swipeState.phase === 'dragging' ? 'is-dragging' : '',
+    swipeState.phase === 'settling' ? 'is-settling' : '',
+  ].filter(Boolean).join(' ');
 
   return (
     <div className="news-gallery-modal" role="dialog" aria-modal="true" onClick={onClose}>
@@ -270,7 +365,7 @@ function NewsGalleryModal({ images, index, onClose, onNext, onPrev }: NewsGaller
           </div>
         </div>
 
-        <div className="news-gallery-frame" onTouchStart={onTouchStart} onTouchEnd={onTouchEnd}>
+        <div className="news-gallery-frame" onTouchStart={onTouchStart} onTouchMove={onTouchMove} onTouchEnd={onTouchEnd} onTouchCancel={onTouchCancel}>
           {hasMany ? (
             <button type="button" className="news-gallery-nav news-gallery-nav-prev" onClick={onPrev} aria-label="Poprzednie zdjęcie">
               <Ic n="chevL" />
@@ -280,14 +375,33 @@ function NewsGalleryModal({ images, index, onClose, onNext, onPrev }: NewsGaller
           )}
 
           <div className={`news-gallery-stage${zoom > 1 ? ' is-zoomed' : ''}`}>
-            <img
-              src={image.src}
-              alt={image.alt}
-              className={`news-gallery-image${zoom > 1 ? ' is-zoomed' : ''}`}
-              style={zoomedStyle}
-              draggable={false}
-              onDoubleClick={toggleZoom}
-            />
+            {canAnimateSwipe ? (
+              <div className={swipeTrackClass} style={swipeTrackStyle}>
+                {[-1, 0, 1].map((offset) => {
+                  const slideImage = getRelativeImage(offset);
+                  return (
+                    <div key={`${slideImage.src}-${offset}`} className={`news-gallery-slide${offset === 0 ? ' is-active' : ''}`}>
+                      <img
+                        src={slideImage.src}
+                        alt={slideImage.alt}
+                        className="news-gallery-image"
+                        draggable={false}
+                        onDoubleClick={toggleZoom}
+                      />
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <img
+                src={image.src}
+                alt={image.alt}
+                className={`news-gallery-image${zoom > 1 ? ' is-zoomed' : ''}`}
+                style={zoomedStyle}
+                draggable={false}
+                onDoubleClick={toggleZoom}
+              />
+            )}
           </div>
 
           {hasMany ? (

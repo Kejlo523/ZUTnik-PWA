@@ -460,7 +460,7 @@ export function NewsDetailScreen({ item, t, backInterceptRef }: NewsDetailScreen
 
   return (
     <section className="screen news-detail-screen">
-      <div className="card">
+      <div className="card news-detail-card">
         <div className="news-detail-title">{item.title}</div>
         <div className="news-detail-date">{item.date}</div>
         {preparedContent.html ? (

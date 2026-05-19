@@ -89,6 +89,15 @@ const PLAN_PREFETCH_DAYS_BACK = 7;
 const PLAN_PREFETCH_DAYS_FORWARD = 21;
 const STATS_OWNER_ALBUM = '57796';
 const PHONE_VIEWPORT_MAX_SIDE = 700;
+const PHONE_VIEWPORT_SCALE_FIX_RATIO = 1.35;
+const PHONE_VIEWPORT_MAX_SCALE_FIX = 3;
+
+interface PhoneViewportState {
+  isPhone: boolean;
+  needsScaleFix: boolean;
+  scale: number;
+  width: number;
+}
 
 interface NavigatorWithStandalone extends Navigator {
   standalone?: boolean;
@@ -136,26 +145,77 @@ function normalizeStatsAlbum(value: unknown): string {
   return match?.[1] ?? '';
 }
 
+function getPositiveViewportNumbers(values: Array<number | undefined>): number[] {
+  return values.filter((value): value is number => typeof value === 'number' && Number.isFinite(value) && value > 0);
+}
+
 function getSmallestViewportSide(): number {
-  const values = [
+  const deviceValues = getPositiveViewportNumbers([
+    window.screen?.width,
+    window.screen?.height,
+    window.screen?.availWidth,
+    window.screen?.availHeight,
+  ]);
+  if (deviceValues.length) {
+    return Math.min(...deviceValues);
+  }
+
+  const viewportValues = getPositiveViewportNumbers([
     window.visualViewport?.width,
     window.visualViewport?.height,
     window.innerWidth,
     window.innerHeight,
     document.documentElement.clientWidth,
     document.documentElement.clientHeight,
-    window.screen?.width,
-    window.screen?.height,
-    window.screen?.availWidth,
-    window.screen?.availHeight,
-  ].filter((value): value is number => typeof value === 'number' && Number.isFinite(value) && value > 0);
+  ]);
 
-  return values.length ? Math.min(...values) : window.innerWidth;
+  return viewportValues.length ? Math.min(...viewportValues) : window.innerWidth;
 }
 
-function isPhoneViewportSnapshot(): boolean {
+function getPhoneViewportState(): PhoneViewportState {
   const hasTouch = navigator.maxTouchPoints > 0 || window.matchMedia('(pointer: coarse)').matches;
-  return hasTouch && getSmallestViewportSide() <= PHONE_VIEWPORT_MAX_SIDE;
+  const isPhone = hasTouch && getSmallestViewportSide() <= PHONE_VIEWPORT_MAX_SIDE;
+  const screenWidths = getPositiveViewportNumbers([
+    window.screen?.width,
+    window.screen?.availWidth,
+  ]);
+  const layoutWidths = getPositiveViewportNumbers([
+    document.documentElement.clientWidth,
+    window.innerWidth,
+    window.visualViewport?.width,
+  ]);
+  const viewportScale = window.visualViewport?.scale;
+  const hasViewportScale = typeof viewportScale === 'number' && Number.isFinite(viewportScale) && viewportScale > 0;
+  const screenWidth = Math.max(1, Math.round(screenWidths.length ? Math.min(...screenWidths) : window.innerWidth));
+  const layoutWidth = layoutWidths.length ? Math.max(...layoutWidths) : screenWidth;
+  const rawScale = screenWidth > 0 ? layoutWidth / screenWidth : 1;
+  const isZoomedOutLayout = hasViewportScale ? viewportScale < 0.95 : layoutWidth >= 900;
+  const needsScaleFix = isPhone && rawScale >= PHONE_VIEWPORT_SCALE_FIX_RATIO && isZoomedOutLayout;
+  const scaleSource = hasViewportScale ? 1 / viewportScale : rawScale;
+  const scale = needsScaleFix ? Math.min(PHONE_VIEWPORT_MAX_SCALE_FIX, Math.round(scaleSource * 100) / 100) : 1;
+  const width = Math.max(1, Math.round(needsScaleFix ? layoutWidth / scale : screenWidth));
+
+  return { isPhone, needsScaleFix, scale, width };
+}
+
+function arePhoneViewportStatesEqual(left: PhoneViewportState, right: PhoneViewportState): boolean {
+  return left.isPhone === right.isPhone
+    && left.needsScaleFix === right.needsScaleFix
+    && left.scale === right.scale
+    && left.width === right.width;
+}
+
+function applyPhoneViewportCss(state: PhoneViewportState): void {
+  const root = document.documentElement;
+  root.classList.toggle('phone-scale-fix', state.needsScaleFix);
+  if (state.needsScaleFix) {
+    root.style.setProperty('--phone-viewport-scale', String(state.scale));
+    root.style.setProperty('--phone-viewport-width', `${state.width}px`);
+    return;
+  }
+
+  root.style.removeProperty('--phone-viewport-scale');
+  root.style.removeProperty('--phone-viewport-width');
 }
 
 function resolvePlanVisibleRange(viewMode: ViewMode, currentDateText: string): { rangeStart: string; rangeEnd: string } {
@@ -203,7 +263,7 @@ function App() {
   const [globalLoading, setGlobalLoad] = useState(false);
   const [globalError, setGlobalError] = useState('');
   const [toast, setToast] = useState('');
-  const [isPhoneViewport, setIsPhoneViewport] = useState(() => isPhoneViewportSnapshot());
+  const [phoneViewport, setPhoneViewport] = useState<PhoneViewportState>(() => getPhoneViewportState());
   const sessionKey = getSessionSignature(session);
   const sessionExpiryHandledRef = useRef(false);
   const sessionCheckInFlightRef = useRef<Promise<boolean> | null>(null);
@@ -579,8 +639,9 @@ function App() {
   const t = useMemo(() => createT(settings.language), [settings.language]);
 
   const refreshPhoneViewport = useCallback(() => {
-    const next = isPhoneViewportSnapshot();
-    setIsPhoneViewport((current) => (current === next ? current : next));
+    const next = getPhoneViewportState();
+    applyPhoneViewportCss(next);
+    setPhoneViewport((current) => (arePhoneViewportStatesEqual(current, next) ? current : next));
   }, []);
 
   const schedulePhoneViewportRefresh = useCallback(() => {
@@ -624,6 +685,9 @@ function App() {
         window.clearTimeout(timer);
       }
       phoneViewportTimerRefs.current = [];
+      document.documentElement.classList.remove('phone-scale-fix');
+      document.documentElement.style.removeProperty('--phone-viewport-scale');
+      document.documentElement.style.removeProperty('--phone-viewport-width');
     };
   }, [schedulePhoneViewportRefresh]);
 
@@ -2719,9 +2783,11 @@ function App() {
   }
 
   // ─────────────────────────────────────────────── render ──────────────────
+  const phoneViewportClass = `${phoneViewport.isPhone ? ' is-phone-viewport' : ''}${phoneViewport.needsScaleFix ? ' is-phone-scale-fix' : ''}`;
+
   return (
     <div
-      className={`app-shell${screen === 'login' ? ' is-login' : ''}${isPhoneViewport ? ' is-phone-viewport' : ''}`}
+      className={`app-shell${screen === 'login' ? ' is-login' : ''}${phoneViewportClass}`}
       onTouchStart={swipe.onTouchStart}
       onTouchMove={swipe.onTouchMove}
       onTouchEnd={swipe.onTouchEnd}

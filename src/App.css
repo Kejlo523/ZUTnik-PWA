@@ -183,6 +183,13 @@ body,
   margin: 0;
 }
 
+html.phone-scale-fix,
+html.phone-scale-fix body,
+html.phone-scale-fix #root {
+  width: 100%;
+  overflow: hidden;
+}
+
 body {
   font-family: var(--font-ui);
   font-size: 14px;
@@ -7371,8 +7378,8 @@ button.outline {
   --plan-time-col-w: 44px;
   height: 100%;
   width: 100%;
-  max-width: 480px;
-  margin: 0 auto;
+  max-width: none;
+  margin: 0;
   display: flex;
   flex-direction: column;
   grid-template-columns: none;
@@ -7380,6 +7387,14 @@ button.outline {
   grid-template-areas: none;
   box-shadow: none;
   overflow: hidden;
+}
+
+.app-shell.is-phone-viewport.is-phone-scale-fix {
+  width: var(--phone-viewport-width, 100%);
+  height: calc(100dvh / var(--phone-viewport-scale, 1));
+  min-height: calc(100dvh / var(--phone-viewport-scale, 1));
+  transform: scale(var(--phone-viewport-scale, 1));
+  transform-origin: top left;
 }
 
 .app-shell.is-phone-viewport main {

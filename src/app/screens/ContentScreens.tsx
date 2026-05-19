@@ -695,7 +695,7 @@ export function AboutScreen({ canOfferInstall, handleInstallPwa, isIosSafari, t 
         </div>
 
         <div className="about-links">
-          <a href="https://endozero.pl" target="_blank" rel="noreferrer" className="about-link-item">
+          <a href="https://zutnik.endozero.pl" target="_blank" rel="noreferrer" className="about-link-item">
             <span className="about-link-icon">ℹ️</span>
             <span className="about-link-text">{t('about.projectSite')}</span>
             <span className="about-link-arrow">→</span>

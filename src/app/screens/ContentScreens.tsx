@@ -270,28 +270,34 @@ function NewsGalleryModal({ images, index, onClose, onNext, onPrev }: NewsGaller
           </div>
         </div>
 
-        {hasMany && (
-          <button type="button" className="news-gallery-nav news-gallery-nav-prev" onClick={onPrev} aria-label="Poprzednie zdjęcie">
-            <Ic n="chevL" />
-          </button>
-        )}
+        <div className="news-gallery-frame" onTouchStart={onTouchStart} onTouchEnd={onTouchEnd}>
+          {hasMany ? (
+            <button type="button" className="news-gallery-nav news-gallery-nav-prev" onClick={onPrev} aria-label="Poprzednie zdjęcie">
+              <Ic n="chevL" />
+            </button>
+          ) : (
+            <div className="news-gallery-nav-spacer" aria-hidden />
+          )}
 
-        <div className="news-gallery-stage" onTouchStart={onTouchStart} onTouchEnd={onTouchEnd}>
-          <img
-            src={image.src}
-            alt={image.alt}
-            className={`news-gallery-image${zoom > 1 ? ' is-zoomed' : ''}`}
-            style={zoomedStyle}
-            draggable={false}
-            onDoubleClick={toggleZoom}
-          />
+          <div className={`news-gallery-stage${zoom > 1 ? ' is-zoomed' : ''}`}>
+            <img
+              src={image.src}
+              alt={image.alt}
+              className={`news-gallery-image${zoom > 1 ? ' is-zoomed' : ''}`}
+              style={zoomedStyle}
+              draggable={false}
+              onDoubleClick={toggleZoom}
+            />
+          </div>
+
+          {hasMany ? (
+            <button type="button" className="news-gallery-nav news-gallery-nav-next" onClick={onNext} aria-label="Następne zdjęcie">
+              <Ic n="chevR" />
+            </button>
+          ) : (
+            <div className="news-gallery-nav-spacer" aria-hidden />
+          )}
         </div>
-
-        {hasMany && (
-          <button type="button" className="news-gallery-nav news-gallery-nav-next" onClick={onNext} aria-label="Następne zdjęcie">
-            <Ic n="chevR" />
-          </button>
-        )}
       </div>
     </div>
   );

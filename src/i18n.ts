@@ -23,6 +23,7 @@ const pl: Record<string, string> = {
     'drawer.links': 'Przydatne strony',
     'drawer.settings': 'Ustawienia',
     'drawer.about': 'O aplikacji',
+    'drawer.stats': 'Statystyki',
     'drawer.logout': 'Wyloguj się',
 
     // Plan
@@ -314,6 +315,7 @@ const en: Record<string, string> = {
     'drawer.links': 'Useful Links',
     'drawer.settings': 'Settings',
     'drawer.about': 'About',
+    'drawer.stats': 'Statistics',
     'drawer.logout': 'Log out',
 
     // Plan

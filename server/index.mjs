@@ -53,8 +53,10 @@ const APP_HOME_PATH = APP_BASE_PATH === '/' ? '/' : `${APP_BASE_PATH}/`;
 const STATS_ROUTE_PATH = APP_BASE_PATH === '/' ? '/stats' : `${APP_BASE_PATH}/stats`;
 const STATS_STORE_PATH = path.join(__dirname, 'data', 'usage-stats.json');
 const PLAN_FILTERS_STORE_PATH = path.join(__dirname, 'data', 'plan-hidden-subjects.json');
-const STATS_BASIC_USER = process.env.STATS_USER || 'Kejlo';
-const STATS_BASIC_PASS = process.env.STATS_PASS || 'hx875875';
+const STATS_ALLOWED_ALBUM = '57796';
+const STATS_ACCESS_COOKIE = 'zutnik_stats_access';
+const STATS_ACCESS_TTL_MS = 60 * 60_000;
+const STATS_ACCESS_SECRET = process.env.STATS_ACCESS_SECRET || USOS_CONSUMER_SECRET || 'zutnik-local-stats-access';
 
 const unsafeAgent = new Agent({
   connect: { rejectUnauthorized: false },
@@ -65,7 +67,7 @@ const statsAccessLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   skipSuccessfulRequests: true,
-  requestWasSuccessful: (req, res) => res.statusCode < 400 && getStatsAuthState(req) === 'valid',
+  requestWasSuccessful: (req, res) => res.statusCode < 400 && hasValidStatsAccess(req),
 });
 const statsService = createStatsService({ storePath: STATS_STORE_PATH, locale: 'pl-PL' });
 
@@ -181,35 +183,73 @@ function safeTextEqual(left, right) {
   return crypto.timingSafeEqual(a, b);
 }
 
-function getStatsAuthState(req) {
-  const authHeader = String(req.headers.authorization || '');
-  if (!authHeader.startsWith('Basic ')) {
-    return 'missing';
-  }
-
-  let decoded = '';
-  try {
-    decoded = Buffer.from(authHeader.slice(6), 'base64').toString('utf8');
-  } catch {
-    return 'invalid';
-  }
-
-  const separatorIndex = decoded.indexOf(':');
-  if (separatorIndex < 0) {
-    return 'invalid';
-  }
-
-  const username = decoded.slice(0, separatorIndex);
-  const password = decoded.slice(separatorIndex + 1);
-
-  return safeTextEqual(username, STATS_BASIC_USER) && safeTextEqual(password, STATS_BASIC_PASS)
-    ? 'valid'
-    : 'invalid';
+function normalizeStatsAlbum(value) {
+  const match = String(value || '').trim().match(/^s?(\d{4,6})$/i);
+  return match?.[1] || '';
 }
 
-function sendStatsBasicAuthPrompt(res) {
-  res.set('WWW-Authenticate', 'Basic realm="ZUTnik stats", charset="UTF-8"');
-  return res.status(401).type('text/plain').send('Authentication required');
+function getCookieValue(req, name) {
+  const cookies = String(req.headers.cookie || '').split(';');
+  for (const cookie of cookies) {
+    const [rawKey, ...rawValue] = cookie.trim().split('=');
+    if (rawKey !== name) continue;
+    try {
+      return decodeURIComponent(rawValue.join('='));
+    } catch {
+      return rawValue.join('=');
+    }
+  }
+  return '';
+}
+
+function signStatsAccessPayload(payload) {
+  return crypto
+    .createHmac('sha256', STATS_ACCESS_SECRET)
+    .update(payload)
+    .digest('base64url');
+}
+
+function createStatsAccessToken(payload) {
+  const encodedPayload = Buffer.from(JSON.stringify(payload)).toString('base64url');
+  return `${encodedPayload}.${signStatsAccessPayload(encodedPayload)}`;
+}
+
+function verifyStatsAccessToken(token) {
+  const [encodedPayload, signature] = String(token || '').split('.');
+  if (!encodedPayload || !signature) return null;
+  if (!safeTextEqual(signature, signStatsAccessPayload(encodedPayload))) return null;
+
+  try {
+    const payload = JSON.parse(Buffer.from(encodedPayload, 'base64url').toString('utf8'));
+    if (!payload || typeof payload !== 'object') return null;
+    if (normalizeStatsAlbum(payload.album) !== STATS_ALLOWED_ALBUM) return null;
+    if (!Number.isFinite(Number(payload.exp)) || Number(payload.exp) < Date.now()) return null;
+    return payload;
+  } catch {
+    return null;
+  }
+}
+
+function hasValidStatsAccess(req) {
+  return Boolean(verifyStatsAccessToken(getCookieValue(req, STATS_ACCESS_COOKIE)));
+}
+
+function isSecureRequest(req) {
+  return req.secure || String(req.headers['x-forwarded-proto'] || '').split(',')[0].trim() === 'https';
+}
+
+function setStatsAccessCookie(req, res, value, maxAge = STATS_ACCESS_TTL_MS) {
+  res.cookie(STATS_ACCESS_COOKIE, value, {
+    httpOnly: true,
+    sameSite: 'lax',
+    secure: isSecureRequest(req),
+    path: STATS_ROUTE_PATH,
+    maxAge,
+  });
+}
+
+function clearStatsAccessCookie(req, res) {
+  setStatsAccessCookie(req, res, '', 0);
 }
 
 function redirectToAppHome(res) {
@@ -736,6 +776,35 @@ app.post('/api/usos/me', async (req, res) => {
   }
 });
 
+app.post('/api/stats/access', async (req, res) => {
+  try {
+    const { token, secret } = getUsosCredentials(req);
+    const user = await fetchUsosJson('services/users/user', {
+      token,
+      secret,
+      tokenMode: 'required',
+      params: { fields: 'id|student_number' },
+    });
+
+    const album = normalizeStatsAlbum(firstNonEmpty(user?.student_number, user?.id));
+    if (album !== STATS_ALLOWED_ALBUM) {
+      return res.status(403).json({ error: 'Brak dostępu do statystyk.' });
+    }
+
+    const now = Date.now();
+    const accessToken = createStatsAccessToken({
+      album,
+      iat: now,
+      exp: now + STATS_ACCESS_TTL_MS,
+    });
+
+    setStatsAccessCookie(req, res, accessToken);
+    return res.json({ ok: true, url: STATS_ROUTE_PATH });
+  } catch (error) {
+    return sendUsosError(res, error);
+  }
+});
+
 app.post('/api/usos/semesters', async (req, res) => {
   try {
     const { token, secret } = getUsosCredentials(req);
@@ -1066,11 +1135,8 @@ app.get('/api/proxy/calendar', async (_req, res) => {
 
 app.get([STATS_ROUTE_PATH, `${STATS_ROUTE_PATH}/`], statsAccessLimiter, (req, res) => {
   res.set('Cache-Control', 'no-store, no-cache, must-revalidate');
-  const authState = getStatsAuthState(req);
-  if (authState === 'missing') {
-    return sendStatsBasicAuthPrompt(res);
-  }
-  if (authState === 'invalid') {
+  if (!hasValidStatsAccess(req)) {
+    clearStatsAccessCookie(req, res);
     return redirectToAppHome(res);
   }
 

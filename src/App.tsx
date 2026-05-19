@@ -32,6 +32,7 @@ import {
   fetchUsosRequestToken,
   isSessionExpiredError,
   loginWithUsos,
+  requestStatsAccess,
   savePlanHiddenSubjects as savePlanHiddenSubjectsByAlbum,
   type PlanWindowData,
   validateSession,
@@ -80,6 +81,7 @@ const SESSION_VALIDATE_INTERVAL_MS = 30 * 24 * 60 * 60_000;
 const EMPTY_FINANCE_SNAPSHOT: FinanceSnapshot = { records: [], fetchedAt: 0 };
 const PLAN_PREFETCH_DAYS_BACK = 7;
 const PLAN_PREFETCH_DAYS_FORWARD = 21;
+const STATS_OWNER_ALBUM = '57796';
 
 interface NavigatorWithStandalone extends Navigator {
   standalone?: boolean;
@@ -120,6 +122,11 @@ function addPlanDays(date: Date, days: number): Date {
 
 function formatPlanDate(date: Date): string {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+}
+
+function normalizeStatsAlbum(value: unknown): string {
+  const match = String(value || '').trim().match(/^s?(\d{4,6})$/i);
+  return match?.[1] ?? '';
 }
 
 function resolvePlanVisibleRange(viewMode: ViewMode, currentDateText: string): { rangeStart: string; rangeEnd: string } {
@@ -172,9 +179,11 @@ function App() {
   const sessionCheckInFlightRef = useRef<Promise<boolean> | null>(null);
   const lastSessionCheckRef = useRef<{ key: string; ts: number }>({ key: '', ts: 0 });
   const activeSessionKeyRef = useRef(sessionKey);
+  const overlayBackAttemptRef = useRef<(() => boolean) | null>(null);
   const rootBackAttemptRef = useRef<(() => boolean) | null>(null);
 
   const nav = useAppNavigation<ScreenKey>(session ? 'home' : 'login', {
+    onBackAttemptRef: overlayBackAttemptRef,
     onRootBackAttemptRef: rootBackAttemptRef,
   });
   const screen = nav.current.key;
@@ -284,6 +293,7 @@ function App() {
 
   const activeStudyId = session?.activeStudyId ?? studies[0]?.przynaleznoscId ?? null;
   const hasMultipleUsosProgrammes = studies.length > 1;
+  const canOpenStats = useMemo(() => normalizeStatsAlbum(session?.userId) === STATS_OWNER_ALBUM, [session?.userId]);
   const currentPlanAlbum = useMemo(() => (planResult?.debug.album || '').trim(), [planResult?.debug.album]);
   const hiddenPlanSubjectKeys = useMemo(() => (
     currentPlanAlbum ? (planHiddenSubjectKeysByAlbum[currentPlanAlbum] ?? []) : []
@@ -1406,6 +1416,23 @@ function App() {
     setDrawerOpen(false);
   }, [nav, screen]);
 
+  const openStatsPage = useCallback(async () => {
+    if (!session || !canOpenStats) return;
+
+    setGlobalLoad(true);
+    try {
+      const statsUrl = await requestStatsAccess(session);
+      window.location.href = statsUrl;
+    } catch (error) {
+      if (isSessionExpiredError(error)) {
+        handleExpiredSession();
+      } else {
+        showToast(error instanceof Error ? error.message : 'Nie udało się otworzyć statystyk');
+      }
+      setGlobalLoad(false);
+    }
+  }, [canOpenStats, handleExpiredSession, session, showToast]);
+
   const togglePlanSubjectFilter = useCallback((key: string) => {
     if (!currentPlanAlbum) return;
 
@@ -2245,7 +2272,7 @@ function App() {
 
   function renderNewsDetail() {
     const p = (nav.current.params ?? {}) as NewsDetailParams;
-    return <NewsDetailScreen item={p.item} t={t} />;
+    return <NewsDetailScreen key={p.item?.id ?? 'empty-news'} item={p.item} t={t} backInterceptRef={overlayBackAttemptRef} />;
   }
 
   function renderLinks() {
@@ -2661,6 +2688,12 @@ function App() {
             </div>
 
             <div className="drawer-footer">
+              {canOpenStats && (
+                <button type="button" className="drawer-stats" onClick={() => void openStatsPage()}>
+                  <Ic n="stats" />
+                  {t('drawer.stats')}
+                </button>
+              )}
               <button type="button" className="drawer-logout" onClick={() => { if (window.confirm(t('logout.confirm'))) { applySession(null); setDrawerOpen(false); } }}>
                 <Ic n="logout" />
                 {t('logout.button')}

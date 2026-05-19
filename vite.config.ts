@@ -22,8 +22,8 @@ function escapeRegex(value: string): string {
 
 const scopedApiPrefix = appBase === '/' ? '/api/' : `${appBaseNoSlash}/api/`;
 const apiDenylist = appBase === '/'
-  ? [/^\/api\//]
-  : [new RegExp(`^${escapeRegex(scopedApiPrefix)}`), /^\/api\//];
+  ? [/^\/api\//, /^\/stats\/?$/]
+  : [new RegExp(`^${escapeRegex(scopedApiPrefix)}`), /^\/api\//, new RegExp(`^${escapeRegex(statsPath)}\\/?$`)];
 
 export default defineConfig({
   base: appBase,

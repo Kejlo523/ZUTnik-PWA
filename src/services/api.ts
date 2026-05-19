@@ -432,6 +432,34 @@ export async function fetchNews(): Promise<NewsItem[]> {
   return fetchUsosNews();
 }
 
+export async function requestStatsAccess(session: SessionData): Promise<string> {
+  if (!session.usos?.accessToken || !session.usos.accessTokenSecret) {
+    throw new SessionExpiredError();
+  }
+
+  const response = await apiFetch(`${API_BASE}/stats/access`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      token: session.usos.accessToken,
+      secret: session.usos.accessTokenSecret,
+      scopes: session.usos.scopes ?? [],
+    }),
+  });
+  const body = (await response.json().catch(() => ({}))) as { url?: string; error?: string };
+
+  if (!response.ok) {
+    const errorMessage = body.error || `Stats access HTTP ${response.status}`;
+    if (hasHttpAuthError(response.status, errorMessage)) {
+      throw new SessionExpiredError();
+    }
+    throw new Error(errorMessage);
+  }
+
+  return firstNonEmpty(body.url, `${import.meta.env.BASE_URL}stats`);
+}
+
 export async function fetchStudentPhotoBlob(session: SessionData): Promise<Blob | null> {
   if (!session.usos) return null;
 

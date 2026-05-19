@@ -10,6 +10,7 @@ const EXIT_EVENT = 'zutnik-exit-attempt';
 const LAST_SCREEN_KEY = 'zutnik_last_screen';
 
 interface UseAppNavigationOptions {
+  onBackAttemptRef?: MutableRefObject<(() => boolean) | null>;
   onRootBackAttemptRef?: MutableRefObject<(() => boolean) | null>;
 }
 
@@ -40,6 +41,11 @@ export function useAppNavigation<TScreen extends string>(
     window.history.pushState(marker, '', window.location.href);
 
     const onPopState = () => {
+      if (options?.onBackAttemptRef?.current?.()) {
+        window.history.pushState({ zutnik: true, ts: Date.now() }, '', window.location.href);
+        return;
+      }
+
       if (stackRef.current.length > 1) {
         setStack((prev) => prev.slice(0, -1));
         return;
@@ -56,7 +62,7 @@ export function useAppNavigation<TScreen extends string>(
 
     window.addEventListener('popstate', onPopState);
     return () => window.removeEventListener('popstate', onPopState);
-  }, [options?.onRootBackAttemptRef]);
+  }, [options?.onBackAttemptRef, options?.onRootBackAttemptRef]);
 
   const push = useCallback((key: TScreen, params?: unknown) => {
     idRef.current += 1;

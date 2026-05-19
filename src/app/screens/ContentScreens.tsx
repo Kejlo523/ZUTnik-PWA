@@ -1,4 +1,4 @@
-import type { Dispatch, SetStateAction } from 'react';
+import { useEffect, useMemo, useRef, useState, type Dispatch, type MutableRefObject, type SetStateAction, type TouchEvent } from 'react';
 
 import type { NewsItem, UsefulLink } from '../../types';
 import type { AppSettings } from '../../services/storage';
@@ -8,6 +8,11 @@ import { Ic, Skeleton, Toggle } from '../ui';
 
 const NEWS_HTML_ALLOWED_TAGS = new Set(['p', 'br', 'strong', 'b', 'em', 'i', 'u', 'ul', 'ol', 'li', 'a', 'img', 'blockquote', 'h2', 'h3', 'h4']);
 const NEWS_HTML_TEXTLESS_TAGS = new Set(['script', 'style', 'iframe', 'object', 'embed', 'form', 'input', 'button', 'svg', 'math']);
+
+interface NewsDetailImage {
+  src: string;
+  alt: string;
+}
 
 function isSafeNewsUrl(value: string, image = false): string {
   try {
@@ -81,6 +86,58 @@ function sanitizeNewsHtml(html: string): string {
   return template.innerHTML;
 }
 
+function normalizeNewsImageSrc(value: string): string {
+  return isSafeNewsUrl(value, true);
+}
+
+function sameNewsImage(left: string, right: string): boolean {
+  try {
+    return new URL(left, window.location.origin).href === new URL(right, window.location.origin).href;
+  } catch {
+    return left === right;
+  }
+}
+
+function prepareNewsDetailContent(html: string, fallbackImageUrl = ''): { html: string; images: NewsDetailImage[] } {
+  const safeHtml = sanitizeNewsHtml(html);
+  const template = document.createElement('template');
+  template.innerHTML = safeHtml;
+
+  const images: NewsDetailImage[] = [];
+  for (const img of Array.from(template.content.querySelectorAll('img'))) {
+    const src = normalizeNewsImageSrc(img.getAttribute('src') || '');
+    if (src) {
+      images.push({
+        src,
+        alt: img.getAttribute('alt') || '',
+      });
+    }
+    img.remove();
+  }
+
+  for (const element of Array.from(template.content.querySelectorAll('a'))) {
+    if (!element.textContent?.trim() && element.children.length === 0) {
+      element.remove();
+    }
+  }
+
+  for (const element of Array.from(template.content.querySelectorAll('p, figure, blockquote'))) {
+    if (!element.textContent?.trim() && element.children.length === 0) {
+      element.remove();
+    }
+  }
+
+  const fallbackSrc = normalizeNewsImageSrc(fallbackImageUrl);
+  if (fallbackSrc && !images.some((image) => sameNewsImage(image.src, fallbackSrc))) {
+    images.unshift({ src: fallbackSrc, alt: '' });
+  }
+
+  return {
+    html: template.innerHTML.trim(),
+    images,
+  };
+}
+
 function NewsLoadingSkeleton() {
   return (
     <div className="list-stack news-skeleton-grid">
@@ -140,31 +197,187 @@ export function NewsScreen({ newsLoading, news, t, onOpenDetail }: NewsScreenPro
 interface NewsDetailScreenProps {
   item?: NewsItem;
   t: TranslateFn;
+  backInterceptRef: MutableRefObject<(() => boolean) | null>;
 }
 
-export function NewsDetailScreen({ item, t }: NewsDetailScreenProps) {
+interface NewsGalleryModalProps {
+  images: NewsDetailImage[];
+  index: number;
+  onClose: () => void;
+  onNext: () => void;
+  onPrev: () => void;
+}
+
+function NewsGalleryModal({ images, index, onClose, onNext, onPrev }: NewsGalleryModalProps) {
+  const image = images[index];
+  const [zoom, setZoom] = useState(1);
+  const touchStartRef = useRef<{ x: number; y: number } | null>(null);
+  const hasMany = images.length > 1;
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onClose();
+      if (event.key === 'ArrowRight' && hasMany) onNext();
+      if (event.key === 'ArrowLeft' && hasMany) onPrev();
+    };
+
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [hasMany, onClose, onNext, onPrev]);
+
+  if (!image) return null;
+
+  const toggleZoom = () => {
+    setZoom((current) => (current > 1 ? 1 : 2));
+  };
+
+  const onTouchStart = (event: TouchEvent<HTMLDivElement>) => {
+    if (event.touches.length !== 1) return;
+    touchStartRef.current = {
+      x: event.touches[0].clientX,
+      y: event.touches[0].clientY,
+    };
+  };
+
+  const onTouchEnd = (event: TouchEvent<HTMLDivElement>) => {
+    const start = touchStartRef.current;
+    touchStartRef.current = null;
+    if (!start || !hasMany || zoom > 1 || event.changedTouches.length !== 1) return;
+
+    const dx = event.changedTouches[0].clientX - start.x;
+    const dy = event.changedTouches[0].clientY - start.y;
+    if (Math.abs(dx) < 52 || Math.abs(dx) < Math.abs(dy) * 1.25) return;
+    if (dx < 0) onNext();
+    else onPrev();
+  };
+
+  const zoomedStyle = zoom > 1
+    ? { width: `${zoom * 100}%`, maxWidth: 'none', maxHeight: 'none' }
+    : undefined;
+
+  return (
+    <div className="news-gallery-modal" role="dialog" aria-modal="true" onClick={onClose}>
+      <div className="news-gallery-surface" onClick={(event) => event.stopPropagation()}>
+        <div className="news-gallery-topbar">
+          <div className="news-gallery-counter">{index + 1} / {images.length}</div>
+          <div className="news-gallery-actions">
+            <button type="button" className="news-gallery-icon-btn" onClick={toggleZoom} aria-label={zoom > 1 ? 'Pomniejsz zdjęcie' : 'Przybliż zdjęcie'}>
+              <Ic n={zoom > 1 ? 'minus' : 'plus'} />
+            </button>
+            <button type="button" className="news-gallery-icon-btn" onClick={onClose} aria-label="Zamknij galerię">
+              <Ic n="x" />
+            </button>
+          </div>
+        </div>
+
+        {hasMany && (
+          <button type="button" className="news-gallery-nav news-gallery-nav-prev" onClick={onPrev} aria-label="Poprzednie zdjęcie">
+            <Ic n="chevL" />
+          </button>
+        )}
+
+        <div className="news-gallery-stage" onTouchStart={onTouchStart} onTouchEnd={onTouchEnd}>
+          <img
+            src={image.src}
+            alt={image.alt}
+            className={`news-gallery-image${zoom > 1 ? ' is-zoomed' : ''}`}
+            style={zoomedStyle}
+            draggable={false}
+            onDoubleClick={toggleZoom}
+          />
+        </div>
+
+        {hasMany && (
+          <button type="button" className="news-gallery-nav news-gallery-nav-next" onClick={onNext} aria-label="Następne zdjęcie">
+            <Ic n="chevR" />
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+export function NewsDetailScreen({ item, t, backInterceptRef }: NewsDetailScreenProps) {
+  const [galleryIndex, setGalleryIndex] = useState<number | null>(null);
+
+  const preparedContent = useMemo(
+    () => (item ? prepareNewsDetailContent(item.contentHtml || item.descriptionHtml, item.thumbUrl) : { html: '', images: [] }),
+    [item],
+  );
+  const galleryOpen = galleryIndex !== null && preparedContent.images.length > 0;
+  const safeGalleryIndex = galleryOpen
+    ? Math.min(Math.max(galleryIndex ?? 0, 0), preparedContent.images.length - 1)
+    : 0;
+
+  useEffect(() => {
+    if (!galleryOpen) return;
+
+    const handler = () => {
+      setGalleryIndex(null);
+      return true;
+    };
+
+    backInterceptRef.current = handler;
+    return () => {
+      if (backInterceptRef.current === handler) {
+        backInterceptRef.current = null;
+      }
+    };
+  }, [backInterceptRef, galleryOpen]);
+
+  const goToGalleryImage = (direction: -1 | 1) => {
+    setGalleryIndex((current) => {
+      const count = preparedContent.images.length;
+      if (!count) return null;
+      const start = current === null ? 0 : current;
+      return (start + direction + count) % count;
+    });
+  };
+
   if (!item) {
     return <section className="screen news-detail-screen"><div className="empty-state"><p>{t('newsDetail.noContent')}</p></div></section>;
   }
-
-  const fullHtml = sanitizeNewsHtml(item.contentHtml || item.descriptionHtml);
 
   return (
     <section className="screen news-detail-screen">
       <div className="card">
         <div className="news-detail-title">{item.title}</div>
         <div className="news-detail-date">{item.date}</div>
-        {item.thumbUrl && <img src={item.thumbUrl} alt="" className="news-detail-img" loading="lazy" decoding="async" crossOrigin="anonymous" />}
-        {fullHtml ? (
-          <div className="news-detail-body" dangerouslySetInnerHTML={{ __html: fullHtml }} />
+        {preparedContent.html ? (
+          <div className="news-detail-body" dangerouslySetInnerHTML={{ __html: preparedContent.html }} />
         ) : (
           <div className="news-detail-body">{item.descriptionText || item.snippet}</div>
+        )}
+        {preparedContent.images.length > 0 && (
+          <div className={`news-detail-media-grid${preparedContent.images.length === 1 ? ' is-single' : ''}`}>
+            {preparedContent.images.map((image, index) => (
+              <button
+                key={`${image.src}-${index}`}
+                type="button"
+                className="news-detail-media-item"
+                onClick={() => setGalleryIndex(index)}
+                aria-label={`Otwórz zdjęcie ${index + 1} z ${preparedContent.images.length}`}
+              >
+                <img src={image.src} alt={image.alt} loading="lazy" decoding="async" />
+              </button>
+            ))}
+          </div>
         )}
       </div>
       {item.link && (
         <a href={item.link} target="_blank" rel="noreferrer" className="news-source-btn">
           {t('newsDetail.openBrowser')} ↗
         </a>
+      )}
+      {galleryOpen && (
+        <NewsGalleryModal
+          key={preparedContent.images[safeGalleryIndex]?.src ?? safeGalleryIndex}
+          images={preparedContent.images}
+          index={safeGalleryIndex}
+          onClose={() => setGalleryIndex(null)}
+          onNext={() => goToGalleryImage(1)}
+          onPrev={() => goToGalleryImage(-1)}
+        />
       )}
     </section>
   );

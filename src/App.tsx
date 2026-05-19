@@ -88,6 +88,7 @@ const EMPTY_FINANCE_SNAPSHOT: FinanceSnapshot = { records: [], fetchedAt: 0 };
 const PLAN_PREFETCH_DAYS_BACK = 7;
 const PLAN_PREFETCH_DAYS_FORWARD = 21;
 const STATS_OWNER_ALBUM = '57796';
+const PHONE_VIEWPORT_MAX_SIDE = 700;
 
 interface NavigatorWithStandalone extends Navigator {
   standalone?: boolean;
@@ -135,6 +136,28 @@ function normalizeStatsAlbum(value: unknown): string {
   return match?.[1] ?? '';
 }
 
+function getSmallestViewportSide(): number {
+  const values = [
+    window.visualViewport?.width,
+    window.visualViewport?.height,
+    window.innerWidth,
+    window.innerHeight,
+    document.documentElement.clientWidth,
+    document.documentElement.clientHeight,
+    window.screen?.width,
+    window.screen?.height,
+    window.screen?.availWidth,
+    window.screen?.availHeight,
+  ].filter((value): value is number => typeof value === 'number' && Number.isFinite(value) && value > 0);
+
+  return values.length ? Math.min(...values) : window.innerWidth;
+}
+
+function isPhoneViewportSnapshot(): boolean {
+  const hasTouch = navigator.maxTouchPoints > 0 || window.matchMedia('(pointer: coarse)').matches;
+  return hasTouch && getSmallestViewportSide() <= PHONE_VIEWPORT_MAX_SIDE;
+}
+
 function resolvePlanVisibleRange(viewMode: ViewMode, currentDateText: string): { rangeStart: string; rangeEnd: string } {
   const current = parsePlanDate(currentDateText);
 
@@ -180,6 +203,7 @@ function App() {
   const [globalLoading, setGlobalLoad] = useState(false);
   const [globalError, setGlobalError] = useState('');
   const [toast, setToast] = useState('');
+  const [isPhoneViewport, setIsPhoneViewport] = useState(() => isPhoneViewportSnapshot());
   const sessionKey = getSessionSignature(session);
   const sessionExpiryHandledRef = useRef(false);
   const sessionCheckInFlightRef = useRef<Promise<boolean> | null>(null);
@@ -187,6 +211,8 @@ function App() {
   const activeSessionKeyRef = useRef(sessionKey);
   const overlayBackAttemptRef = useRef<(() => boolean) | null>(null);
   const rootBackAttemptRef = useRef<(() => boolean) | null>(null);
+  const phoneViewportRafRef = useRef<number | null>(null);
+  const phoneViewportTimerRefs = useRef<number[]>([]);
 
   const nav = useAppNavigation<ScreenKey>(session ? 'home' : 'login', {
     onBackAttemptRef: overlayBackAttemptRef,
@@ -552,6 +578,55 @@ function App() {
   // ── i18n ───────────────────────────────────────────────────────────────────
   const t = useMemo(() => createT(settings.language), [settings.language]);
 
+  const refreshPhoneViewport = useCallback(() => {
+    const next = isPhoneViewportSnapshot();
+    setIsPhoneViewport((current) => (current === next ? current : next));
+  }, []);
+
+  const schedulePhoneViewportRefresh = useCallback(() => {
+    if (phoneViewportRafRef.current !== null) {
+      window.cancelAnimationFrame(phoneViewportRafRef.current);
+    }
+    for (const timer of phoneViewportTimerRefs.current) {
+      window.clearTimeout(timer);
+    }
+
+    phoneViewportRafRef.current = window.requestAnimationFrame(() => {
+      phoneViewportRafRef.current = null;
+      refreshPhoneViewport();
+    });
+    phoneViewportTimerRefs.current = [80, 240, 600].map((delay) => window.setTimeout(refreshPhoneViewport, delay));
+  }, [refreshPhoneViewport]);
+
+  useEffect(() => {
+    const visualViewport = window.visualViewport;
+    const refresh = () => schedulePhoneViewportRefresh();
+    schedulePhoneViewportRefresh();
+
+    window.addEventListener('resize', refresh);
+    window.addEventListener('orientationchange', refresh);
+    window.addEventListener('pageshow', refresh);
+    document.addEventListener('visibilitychange', refresh);
+    visualViewport?.addEventListener('resize', refresh);
+    visualViewport?.addEventListener('scroll', refresh);
+
+    return () => {
+      window.removeEventListener('resize', refresh);
+      window.removeEventListener('orientationchange', refresh);
+      window.removeEventListener('pageshow', refresh);
+      document.removeEventListener('visibilitychange', refresh);
+      visualViewport?.removeEventListener('resize', refresh);
+      visualViewport?.removeEventListener('scroll', refresh);
+      if (phoneViewportRafRef.current !== null) {
+        window.cancelAnimationFrame(phoneViewportRafRef.current);
+      }
+      for (const timer of phoneViewportTimerRefs.current) {
+        window.clearTimeout(timer);
+      }
+      phoneViewportTimerRefs.current = [];
+    };
+  }, [schedulePhoneViewportRefresh]);
+
   // ── Exit toast ────────────────────────────────────────────────────────────
   useExitAttemptToast(() => showToast(t('general.pressAgainToExit')));
 
@@ -700,13 +775,14 @@ function App() {
       loginWithUsos(verifier, token, secret)
         .then(s => {
           applySession(s);
+          schedulePhoneViewportRefresh();
           showToast('Zalogowano przez USOS');
           sessionStorage.removeItem('usos_request_token_secret');
         })
         .catch(e => setGlobalError(e instanceof Error ? e.message : 'Błąd logowania USOS.'))
         .finally(() => setGlobalLoad(false));
     }
-  }, [applySession, showToast]);
+  }, [applySession, schedulePhoneViewportRefresh, showToast]);
 
   const updateActiveStudy = useCallback((id: string | null) => {
     setSession(prev => (prev ? { ...prev, activeStudyId: id } : prev));
@@ -2645,7 +2721,7 @@ function App() {
   // ─────────────────────────────────────────────── render ──────────────────
   return (
     <div
-      className={`app-shell${screen === 'login' ? ' is-login' : ''}`}
+      className={`app-shell${screen === 'login' ? ' is-login' : ''}${isPhoneViewport ? ' is-phone-viewport' : ''}`}
       onTouchStart={swipe.onTouchStart}
       onTouchMove={swipe.onTouchMove}
       onTouchEnd={swipe.onTouchEnd}

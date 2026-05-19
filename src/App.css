@@ -7362,3 +7362,233 @@ button.outline {
     width: min(1100px, calc(100vw - var(--desktop-sidebar-w) - 40px));
   }
 }
+
+/* Phone viewport safety net after external auth redirects */
+.app-shell.is-phone-viewport {
+  --appbar-h: 56px;
+  --drawer-w: min(260px, 80vw);
+  --desktop-sidebar-w: 0px;
+  --plan-time-col-w: 44px;
+  height: 100%;
+  width: 100%;
+  max-width: 480px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  grid-template-columns: none;
+  grid-template-rows: none;
+  grid-template-areas: none;
+  box-shadow: none;
+  overflow: hidden;
+}
+
+.app-shell.is-phone-viewport main {
+  grid-area: auto;
+  flex: 1;
+  height: auto;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 6px 10px 24px;
+}
+
+.app-shell.is-phone-viewport .android-appbar {
+  grid-area: auto;
+  position: sticky;
+  top: 0;
+  height: var(--appbar-h);
+  grid-template-columns: 48px 1fr auto;
+  border-bottom: 0;
+  box-shadow: var(--shadow-1);
+  padding: 0 4px;
+}
+
+.app-shell.is-phone-viewport .android-appbar:has(.appbar-nav-btn.is-back) {
+  grid-template-columns: 48px 1fr auto;
+}
+
+.app-shell.is-phone-viewport .appbar-nav-btn:not(.is-back) {
+  display: grid;
+}
+
+.app-shell.is-phone-viewport .app-drawer {
+  grid-area: auto;
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  height: auto;
+  pointer-events: none;
+}
+
+.app-shell.is-phone-viewport .app-drawer.open {
+  pointer-events: auto;
+}
+
+.app-shell.is-phone-viewport .drawer-backdrop {
+  display: block;
+}
+
+.app-shell.is-phone-viewport .drawer-panel {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: var(--drawer-w);
+  height: 100%;
+  transform: translateX(-101%) !important;
+  transition: transform 220ms cubic-bezier(.4, 0, .2, 1);
+  box-shadow: var(--shadow-drawer);
+  border-right: 0;
+  border-radius: 0;
+  overflow: hidden;
+}
+
+.app-shell.is-phone-viewport .app-drawer.open .drawer-panel {
+  transform: translateX(0) !important;
+}
+
+.app-shell.is-phone-viewport .screen {
+  width: auto;
+  max-width: none;
+  margin: 0;
+  gap: 8px;
+}
+
+.app-shell.is-phone-viewport .home-screen,
+.app-shell.is-phone-viewport .plan-screen,
+.app-shell.is-phone-viewport .grades-screen,
+.app-shell.is-phone-viewport .finance-screen,
+.app-shell.is-phone-viewport .info-screen,
+.app-shell.is-phone-viewport .settings-screen,
+.app-shell.is-phone-viewport .about-screen {
+  display: flex;
+  flex-direction: column;
+  grid-template-columns: none;
+  grid-template-areas: none;
+  max-width: none;
+  width: auto;
+  margin: 0;
+  gap: 8px;
+}
+
+.app-shell.is-phone-viewport .home-scroll-content {
+  max-width: none;
+  width: auto;
+  margin: 0;
+  padding: 16px;
+}
+
+.app-shell.is-phone-viewport .tile-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.app-shell.is-phone-viewport .news-screen .list-stack,
+.app-shell.is-phone-viewport .links-screen {
+  display: flex;
+  flex-direction: column;
+  grid-template-columns: none;
+  gap: 8px;
+  padding: 0;
+}
+
+.app-shell.is-phone-viewport .news-screen .news-card {
+  height: auto;
+}
+
+.app-shell.is-phone-viewport .plan-control-pane,
+.app-shell.is-phone-viewport .info-side,
+.app-shell.is-phone-viewport .settings-side-card,
+.app-shell.is-phone-viewport .about-overview,
+.app-shell.is-phone-viewport .grades-filters-container,
+.app-shell.is-phone-viewport .finance-filters-container {
+  position: static;
+  top: auto;
+  max-height: none;
+}
+
+.app-shell.is-phone-viewport .plan-screen {
+  align-items: stretch;
+}
+
+.app-shell.is-phone-viewport .plan-sticky-header {
+  max-width: none;
+  width: auto;
+  margin: 0;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 0;
+  background: var(--mz-bg);
+}
+
+.app-shell.is-phone-viewport .plan-content {
+  padding: 0;
+  min-height: 100%;
+}
+
+.app-shell.is-phone-viewport .plan-content-surface {
+  max-width: none;
+  width: auto;
+  margin: 0;
+  min-height: 100%;
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+}
+
+.app-shell.is-phone-viewport .plan-container {
+  max-width: none;
+  margin: 0;
+}
+
+.app-shell.is-phone-viewport .plan-floating-toolbar {
+  width: 100%;
+  min-width: 0;
+  max-width: none;
+}
+
+.app-shell.is-phone-viewport .plan-legend-side {
+  display: none;
+}
+
+.app-shell.is-phone-viewport .plan-legend-bottom {
+  display: block;
+}
+
+.app-shell.is-phone-viewport .grades-screen > .grades-header-wrapper,
+.app-shell.is-phone-viewport .finance-screen > .finance-header-wrapper {
+  display: block;
+}
+
+.app-shell.is-phone-viewport .grades-screen .grades-hero,
+.app-shell.is-phone-viewport .grades-screen .grades-filters-container,
+.app-shell.is-phone-viewport .grades-screen .grades-surface,
+.app-shell.is-phone-viewport .finance-hero,
+.app-shell.is-phone-viewport .finance-filters-container,
+.app-shell.is-phone-viewport .finance-surface,
+.app-shell.is-phone-viewport .finance-notice-card {
+  grid-area: auto;
+}
+
+.app-shell.is-phone-viewport .grades-screen .grades-surface,
+.app-shell.is-phone-viewport .finance-surface,
+.app-shell.is-phone-viewport .info-main {
+  min-height: 0;
+}
+
+.app-shell.is-phone-viewport .grades-screen .grades-filters,
+.app-shell.is-phone-viewport .finance-summary-grid,
+.app-shell.is-phone-viewport .settings-side-grid,
+.app-shell.is-phone-viewport .about-actions {
+  grid-template-columns: 1fr;
+}
+
+.app-shell.is-phone-viewport .settings-screen .settings-card,
+.app-shell.is-phone-viewport .settings-main .settings-card {
+  max-width: none;
+  margin: 0;
+}
+
+.app-shell.is-phone-viewport .finance-notice-card {
+  left: 50%;
+  width: min(460px, calc(100vw - 20px));
+  transform: translateX(-50%);
+}

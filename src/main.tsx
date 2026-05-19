@@ -11,6 +11,11 @@ import '@fontsource/space-grotesk/700.css';
 import './index.css';
 import App from './App';
 
+const viewportMeta = document.querySelector<HTMLMetaElement>('meta[name="viewport"]');
+if (viewportMeta) {
+  viewportMeta.content = 'width=device-width, initial-scale=1.0, viewport-fit=cover';
+}
+
 registerSW({ immediate: true });
 
 createRoot(document.getElementById('root')!).render(<App />);

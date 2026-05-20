@@ -27,6 +27,7 @@ const LEGACY_DEVICE_ID_KEY = 'mzutv2_pwa_device_id';
 
 export interface AppSettings {
   language: 'pl' | 'en';
+  theme: 'system' | 'light' | 'dark';
   notificationsEnabled: boolean;
   refreshMinutes: 30 | 60 | 120;
   compactPlan: boolean;
@@ -35,11 +36,16 @@ export interface AppSettings {
 
 const defaultSettings: AppSettings = {
   language: 'pl',
+  theme: 'system',
   notificationsEnabled: true,
   refreshMinutes: 30,
   compactPlan: false,
   gradesGrouping: true,
 };
+
+function normalizeThemePreference(value: unknown): AppSettings['theme'] {
+  return value === 'light' || value === 'dark' || value === 'system' ? value : 'system';
+}
 
 export function loadSession(): SessionData | null {
   try {
@@ -83,6 +89,7 @@ export function loadSettings(): AppSettings {
     const parsed = JSON.parse(raw) as Partial<AppSettings>;
     const settings: AppSettings = {
       language: parsed.language === 'en' ? 'en' : 'pl',
+      theme: normalizeThemePreference(parsed.theme),
       notificationsEnabled: typeof parsed.notificationsEnabled === 'boolean' ? parsed.notificationsEnabled : true,
       refreshMinutes: [30, 60, 120].includes(parsed.refreshMinutes ?? 30) ? (parsed.refreshMinutes as 30 | 60 | 120) : 30,
       compactPlan: Boolean(parsed.compactPlan),

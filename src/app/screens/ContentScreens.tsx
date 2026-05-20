@@ -539,11 +539,22 @@ interface SettingsScreenProps {
 }
 
 export function SettingsScreen({ settings, setSettings, t }: SettingsScreenProps) {
+  const themeOptions = [
+    { value: 'system' as const, label: t('settings.themeSystem') },
+    { value: 'light' as const, label: t('settings.themeLight') },
+    { value: 'dark' as const, label: t('settings.themeDark') },
+  ];
+  const themeLabel = themeOptions.find((option) => option.value === settings.theme)?.label ?? t('settings.themeSystem');
   const summaryItems = [
     {
       icon: 'user',
       label: t('settings.language'),
       value: settings.language === 'pl' ? 'Polski' : 'English',
+    },
+    {
+      icon: 'eye',
+      label: t('settings.theme'),
+      value: themeLabel,
     },
     {
       icon: 'clock',
@@ -599,6 +610,30 @@ export function SettingsScreen({ settings, setSettings, t }: SettingsScreenProps
               <option value="pl">Polski</option>
               <option value="en">English</option>
             </select>
+          </div>
+
+          <div className="settings-row settings-row-theme">
+            <div className="settings-row-info">
+              <div className="settings-row-label">{t('settings.theme')}</div>
+              <div className="settings-row-sub">{t('settings.themeSub')}</div>
+            </div>
+            <div className="settings-theme-segmented" role="radiogroup" aria-label={t('settings.theme')}>
+              {themeOptions.map((option) => {
+                const active = settings.theme === option.value;
+                return (
+                  <button
+                    key={option.value}
+                    type="button"
+                    className={`settings-theme-segment${active ? ' is-active' : ''}`}
+                    role="radio"
+                    aria-checked={active}
+                    onClick={() => setSettings((p) => ({ ...p, theme: option.value }))}
+                  >
+                    {option.label}
+                  </button>
+                );
+              })}
+            </div>
           </div>
 
           <div className="settings-row">

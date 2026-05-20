@@ -32,6 +32,18 @@
   --mz-skeleton-base: rgba(255, 255, 255, 0.05);
   --mz-skeleton-mid: rgba(255, 255, 255, 0.08);
   --mz-skeleton-shine: rgba(255, 255, 255, 0.16);
+  --mz-banner-bg: rgba(18, 18, 18, 0.94);
+  --mz-banner-text: #f4f4f5;
+  --mz-banner-border: rgba(255, 255, 255, 0.14);
+  --mz-banner-error-bg: rgba(36, 13, 13, 0.94);
+  --mz-banner-error-text: #fff7f7;
+  --mz-banner-error-border: rgba(255, 82, 82, 0.28);
+  --mz-banner-action-bg: rgba(255, 255, 255, 0.07);
+  --mz-banner-action-bg-active: rgba(255, 255, 255, 0.12);
+  --mz-banner-action-border: rgba(255, 255, 255, 0.16);
+  --mz-toast-bg: #17171b;
+  --mz-toast-text: #f4f4f5;
+  --mz-toast-shadow: 0 4px 16px rgba(0, 0, 0, .45);
 
   /* Plan event colours */
   --ev-lecture: #828ac2;
@@ -71,7 +83,7 @@
 
 /* ── Light theme (when system prefers light) ─────────────────────────── */
 @media (prefers-color-scheme: light) {
-  :root {
+  :root:not([data-theme="dark"]) {
     color-scheme: light;
 
     --mz-bg: #f5f5f7;
@@ -95,6 +107,18 @@
     --mz-skeleton-base: rgba(17, 24, 39, 0.05);
     --mz-skeleton-mid: rgba(17, 24, 39, 0.08);
     --mz-skeleton-shine: rgba(255, 255, 255, 0.82);
+    --mz-banner-bg: rgba(255, 255, 255, 0.96);
+    --mz-banner-text: #1a1a1a;
+    --mz-banner-border: rgba(17, 24, 39, 0.12);
+    --mz-banner-error-bg: rgba(255, 247, 246, 0.98);
+    --mz-banner-error-text: #5f1712;
+    --mz-banner-error-border: rgba(217, 48, 37, 0.22);
+    --mz-banner-action-bg: rgba(17, 24, 39, 0.05);
+    --mz-banner-action-bg-active: rgba(17, 24, 39, 0.09);
+    --mz-banner-action-border: rgba(17, 24, 39, 0.10);
+    --mz-toast-bg: rgba(255, 255, 255, 0.98);
+    --mz-toast-text: #1a1a1a;
+    --mz-toast-shadow: 0 10px 28px rgba(17, 24, 39, 0.18);
 
     --ev-lecture: #7986cb;
     --ev-lecture-l: #ffffff;
@@ -126,8 +150,8 @@
   }
 
   .toast {
-    background: #323232;
-    color: #fafafa;
+    background: var(--mz-toast-bg);
+    color: var(--mz-toast-text);
   }
 
   .android-appbar {
@@ -167,6 +191,72 @@
   .news-detail-body a {
     color: var(--mz-primary);
   }
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+
+  --mz-bg: #f5f5f7;
+  --mz-bg-soft: #eeeeef;
+  --mz-surface: #ffffff;
+  --mz-card: #ffffff;
+  --mz-card-soft: #f0f0f2;
+  --mz-text: #1a1a1a;
+  --mz-text-soft: #3c3c43;
+  --mz-muted: #8e8e93;
+  --mz-border-soft: #e0e0e2;
+  --mz-border: #c7c7cc;
+  --mz-primary: #1976d2;
+  --mz-primary-dark: #1565c0;
+  --mz-primary-10: rgba(25, 118, 210, 0.10);
+  --mz-primary-20: rgba(25, 118, 210, 0.18);
+  --mz-success: #34a853;
+  --mz-warning: #e8a317;
+  --mz-danger: #d93025;
+  --mz-danger-10: rgba(217, 48, 37, 0.08);
+  --mz-skeleton-base: rgba(17, 24, 39, 0.05);
+  --mz-skeleton-mid: rgba(17, 24, 39, 0.08);
+  --mz-skeleton-shine: rgba(255, 255, 255, 0.82);
+  --mz-banner-bg: rgba(255, 255, 255, 0.96);
+  --mz-banner-text: #1a1a1a;
+  --mz-banner-border: rgba(17, 24, 39, 0.12);
+  --mz-banner-error-bg: rgba(255, 247, 246, 0.98);
+  --mz-banner-error-text: #5f1712;
+  --mz-banner-error-border: rgba(217, 48, 37, 0.22);
+  --mz-banner-action-bg: rgba(17, 24, 39, 0.05);
+  --mz-banner-action-bg-active: rgba(17, 24, 39, 0.09);
+  --mz-banner-action-border: rgba(17, 24, 39, 0.10);
+  --mz-toast-bg: rgba(255, 255, 255, 0.98);
+  --mz-toast-text: #1a1a1a;
+  --mz-toast-shadow: 0 10px 28px rgba(17, 24, 39, 0.18);
+
+  --ev-lecture: #7986cb;
+  --ev-lecture-l: #ffffff;
+  --ev-lab: #ab47bc;
+  --ev-lab-l: #ffffff;
+  --ev-auditory: #5c6bc0;
+  --ev-auditory-l: #ffffff;
+  --ev-exam: #ef5350;
+  --ev-exam-l: #ffffff;
+  --ev-remote: #ec407a;
+  --ev-remote-l: #ffffff;
+  --ev-cancelled: #9e9e9e;
+  --ev-cancelled-l: #ffffff;
+  --ev-pass: #66bb6a;
+  --ev-pass-l: #ffffff;
+  --ev-class: #5c6bc0;
+  --ev-class-l: #ffffff;
+  --ev-project: #26a69a;
+  --ev-seminar: #66bb6a;
+  --ev-diploma: #ffa726;
+  --ev-lectorate: #29b6f6;
+  --ev-conservatory: #ab47bc;
+  --ev-consultation: #bdbdbd;
+  --ev-field: #9ccc65;
+
+  --shadow-1: 0 1px 3px rgba(0, 0, 0, .08), 0 1px 2px rgba(0, 0, 0, .06);
+  --shadow-2: 0 4px 16px rgba(0, 0, 0, .10);
+  --shadow-drawer: 0 8px 40px rgba(0, 0, 0, .15);
 }
 
 /* ── Reset ───────────────────────────────────────────────────────────── */
@@ -4535,6 +4625,61 @@ button.outline {
   align-self: center;
 }
 
+.settings-theme-segmented {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  align-self: center;
+  padding: 3px;
+  border-radius: 13px;
+  border: 1px solid var(--mz-border-soft);
+  background: var(--mz-card-soft);
+  flex-shrink: 0;
+}
+
+.settings-theme-segment {
+  min-width: 72px;
+  min-height: 34px;
+  padding: 7px 10px;
+  border: none;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--mz-muted);
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1;
+  cursor: pointer;
+  transition: background 160ms, color 160ms, box-shadow 160ms;
+}
+
+.settings-theme-segment.is-active {
+  background: var(--mz-surface);
+  color: var(--mz-text);
+  box-shadow: var(--shadow-1);
+}
+
+.settings-theme-segment:focus-visible {
+  outline: 2px solid var(--mz-primary);
+  outline-offset: 2px;
+}
+
+@media (max-width: 480px) {
+  .settings-row-theme {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .settings-theme-segmented {
+    width: 100%;
+  }
+
+  .settings-theme-segment {
+    flex: 1 1 0;
+    min-width: 0;
+    padding-inline: 8px;
+  }
+}
+
 /* Custom toggle switch */
 .toggle-wrap {
   position: relative;
@@ -5211,9 +5356,9 @@ button.outline {
   padding: 12px 14px;
   font-size: 13px;
   font-weight: 500;
-  background: rgba(18, 18, 18, 0.92);
-  color: var(--mz-text);
-  border: 1px solid var(--mz-border);
+  background: var(--mz-banner-bg);
+  color: var(--mz-banner-text);
+  border: 1px solid var(--mz-banner-border);
   box-shadow: 0 12px 30px rgba(0, 0, 0, .28);
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
@@ -5281,17 +5426,17 @@ button.outline {
 }
 
 .banner.error {
-  background: rgba(36, 13, 13, 0.94);
-  color: var(--mz-text);
-  border-color: rgba(255, 82, 82, 0.24);
+  background: var(--mz-banner-error-bg);
+  color: var(--mz-banner-error-text);
+  border-color: var(--mz-banner-error-border);
 }
 
 .banner-close,
 .banner-retry {
   margin-left: auto;
   align-self: center;
-  background: rgba(255, 255, 255, 0.06);
-  border: 1px solid var(--mz-border-soft);
+  background: var(--mz-banner-action-bg);
+  border: 1px solid var(--mz-banner-action-border);
   color: inherit;
   border-radius: 999px;
   padding: 7px 12px;
@@ -5306,7 +5451,7 @@ button.outline {
 .banner-close:active,
 .banner-retry:active {
   opacity: 1;
-  background: rgba(255, 255, 255, 0.1);
+  background: var(--mz-banner-action-bg-active);
 }
 
 /* ── PWA Install Tip ─────────────────────────────────────────────────────── */
@@ -5477,8 +5622,8 @@ button.outline {
   left: 50%;
   bottom: calc(env(safe-area-inset-bottom, 0px) + 18px);
   transform: translateX(-50%);
-  background: #17171b;
-  color: #f4f4f5;
+  background: var(--mz-toast-bg);
+  color: var(--mz-toast-text);
   padding: 10px 16px;
   border-radius: 22px;
   font-size: 13px;
@@ -5487,7 +5632,7 @@ button.outline {
   width: min(calc(100vw - 24px), 420px);
   text-align: center;
   white-space: normal;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, .45);
+  box-shadow: var(--mz-toast-shadow);
   animation: toast-in 180ms ease-out;
   pointer-events: none;
 }
@@ -5501,8 +5646,8 @@ button.outline {
 
 @media (prefers-color-scheme: light) {
   .toast {
-    background: #17171b;
-    color: #f4f4f5;
+    background: var(--mz-toast-bg);
+    color: var(--mz-toast-text);
   }
 }
 

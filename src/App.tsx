@@ -218,6 +218,15 @@ function applyPhoneViewportCss(state: PhoneViewportState): void {
   root.style.removeProperty('--phone-viewport-width');
 }
 
+function applyThemePreference(theme: AppSettings['theme']): void {
+  const root = document.documentElement;
+  if (theme === 'system') {
+    root.removeAttribute('data-theme');
+    return;
+  }
+  root.dataset.theme = theme;
+}
+
 function resolvePlanVisibleRange(viewMode: ViewMode, currentDateText: string): { rangeStart: string; rangeEnd: string } {
   const current = parsePlanDate(currentDateText);
 
@@ -257,7 +266,11 @@ function buildPlanWindowCacheKey(studyId: string | null, search: { category: str
 
 function App() {
   const [session, setSession] = useState<SessionData | null>(() => loadSession());
-  const [settings, setSettings] = useState<AppSettings>(() => loadSettings());
+  const [settings, setSettings] = useState<AppSettings>(() => {
+    const loaded = loadSettings();
+    applyThemePreference(loaded.theme);
+    return loaded;
+  });
   const [studies, setStudies] = useState<Study[]>([]);
   const [isOnline, setIsOnline] = useState(() => navigator.onLine);
   const [globalLoading, setGlobalLoad] = useState(false);
@@ -570,7 +583,10 @@ function App() {
   }, [selectedPlanEvent]);
 
   // ── Sync settings ─────────────────────────────────────────────────────────
-  useEffect(() => { saveSettings(settings); }, [settings]);
+  useEffect(() => {
+    applyThemePreference(settings.theme);
+    saveSettings(settings);
+  }, [settings]);
 
   // ── Session → navigation sync ─────────────────────────────────────────────
   useEffect(() => {

@@ -13,6 +13,7 @@ import type {
   Semester,
   SessionData,
   SessionPeriod,
+  StatsSnapshot,
   Study,
   StudyDetails,
   StudyHistoryItem,
@@ -33,12 +34,12 @@ import {
   fetchPlanSemesterExport,
   fetchPlanSuggestions,
   fetchPlanWindow,
+  fetchStatsSnapshot,
   fetchStudentPhotoBlob,
   fetchSurveysToFill,
   fetchUsosRequestToken,
   isSessionExpiredError,
   loginWithUsos,
-  requestStatsAccess,
   savePlanHiddenSubjects as savePlanHiddenSubjectsByAlbum,
   type PlanWindowData,
   validateSession,
@@ -79,7 +80,7 @@ import {
 import { Ic, Skeleton } from './app/ui';
 import type { DrawerScreenKey, NewsDetailParams, SelectedPlanEvent } from './app/viewTypes';
 import { HomeScreen, LoginScreen } from './app/screens/AuthScreens';
-import { AboutScreen, LinksScreen, NewsDetailScreen, NewsScreen, SettingsScreen } from './app/screens/ContentScreens';
+import { AboutScreen, LinksScreen, NewsDetailScreen, NewsScreen, SettingsScreen, StatsScreen } from './app/screens/ContentScreens';
 import { PlanEventSheet, PlanFiltersSheet, PlanSearchSheet } from './app/screens/PlanOverlays';
 import { FinanceScreen, GradesScreen, InfoScreen } from './app/screens/StudyScreens';
 
@@ -292,6 +293,7 @@ function App() {
     onRootBackAttemptRef: rootBackAttemptRef,
   });
   const screen = nav.current.key;
+  const statsDeepLinkHandledRef = useRef(false);
 
   const [drawerOpen, setDrawerOpen] = useState(false);
 
@@ -401,6 +403,11 @@ function App() {
   // News
   const [news, setNews] = useState<NewsItem[]>([]);
   const [newsLoading, setNewsLoading] = useState(false);
+
+  // Stats
+  const [statsSnapshot, setStatsSnapshot] = useState<StatsSnapshot | null>(null);
+  const [statsLoading, setStatsLoading] = useState(false);
+  const [statsError, setStatsError] = useState('');
 
   const activeStudyId = session?.activeStudyId ?? studies[0]?.przynaleznoscId ?? null;
   const hasMultipleUsosProgrammes = studies.length > 1;
@@ -596,11 +603,38 @@ function App() {
   }, [session]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
+    if (screen === 'stats' && !canOpenStats) {
+      nav.reset('home', undefined);
+    }
+  }, [canOpenStats, nav, screen]);
+
+  useEffect(() => {
+    if (statsDeepLinkHandledRef.current || !session) return;
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('screen') !== 'stats') return;
+
+    statsDeepLinkHandledRef.current = true;
+    params.delete('screen');
+    const nextSearch = params.toString();
+    window.history.replaceState(
+      { zutnik: true, ts: Date.now() },
+      '',
+      `${window.location.pathname}${nextSearch ? `?${nextSearch}` : ''}${window.location.hash}`,
+    );
+
+    if (canOpenStats) {
+      nav.reset('stats', undefined);
+    }
+  }, [canOpenStats, nav, session]);
+
+  useEffect(() => {
     activeSessionKeyRef.current = sessionKey;
     sessionExpiryHandledRef.current = false;
     planWindowCacheRef.current = {};
     planWindowRequestsRef.current = {};
     planRequestIdRef.current = '';
+    setStatsSnapshot(null);
+    setStatsError('');
 
     if (!sessionKey) {
       sessionCheckInFlightRef.current = null;
@@ -1389,6 +1423,25 @@ function App() {
     }
   }, []);
 
+  const loadStatsData = useCallback(async (forceRefresh = false) => {
+    if (!session || !canOpenStats) return;
+    if (statsSnapshot && !forceRefresh) return;
+
+    setStatsLoading(true);
+    setStatsError('');
+    try {
+      const snapshot = await fetchStatsSnapshot(session);
+      setStatsSnapshot(snapshot);
+    } catch (e) {
+      if (handleSessionError(e)) return;
+      const message = e instanceof Error ? e.message : 'Nie można pobrać statystyk.';
+      setStatsError(message);
+      if (!statsSnapshot) setGlobalError(message);
+    } finally {
+      setStatsLoading(false);
+    }
+  }, [canOpenStats, handleSessionError, session, statsSnapshot]);
+
   // ── Load on screen enter ──────────────────────────────────────────────────
   const prevScreen = useRef<ScreenKey | null>(null);
   useEffect(() => {
@@ -1399,6 +1452,7 @@ function App() {
     if (screen === 'finance') void loadFinanceData();
     if (screen === 'info') void loadInfoData();
     if (screen === 'news') void loadNewsData();
+    if (screen === 'stats') void loadStatsData();
   }, [screen, session]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const prevStudyId = useRef<string | null>(null);
@@ -1656,23 +1710,6 @@ function App() {
     setDrawerOpen(false);
   }, [nav, screen]);
 
-  const openStatsPage = useCallback(async () => {
-    if (!session || !canOpenStats) return;
-
-    setGlobalLoad(true);
-    try {
-      const statsUrl = await requestStatsAccess(session);
-      window.location.href = statsUrl;
-    } catch (error) {
-      if (isSessionExpiredError(error)) {
-        handleExpiredSession();
-      } else {
-        showToast(error instanceof Error ? error.message : 'Nie udało się otworzyć statystyk');
-      }
-      setGlobalLoad(false);
-    }
-  }, [canOpenStats, handleExpiredSession, session, showToast]);
-
   const togglePlanSubjectFilter = useCallback((key: string) => {
     if (!currentPlanAlbum) return;
 
@@ -1779,6 +1816,7 @@ function App() {
     { key: 'finance', label: t('drawer.finance'), icon: 'wallet' },
     { key: 'info', label: t('drawer.info'), icon: 'user' },
     { key: 'news', label: t('drawer.news'), icon: 'news' },
+    ...(canOpenStats ? [{ key: 'stats' as const, label: t('drawer.stats'), icon: 'stats' }] : []),
     { key: 'links', label: t('drawer.links'), icon: 'link' },
     { key: 'settings', label: t('drawer.settings'), icon: 'settings' },
     { key: 'about', label: t('drawer.about'), icon: 'about' },
@@ -2525,6 +2563,19 @@ function App() {
     return <LinksScreen links={links} t={t} />;
   }
 
+  function renderStats() {
+    return (
+      <StatsScreen
+        snapshot={statsSnapshot}
+        statsLoading={statsLoading}
+        statsError={statsError}
+        language={settings.language}
+        t={t}
+        onRefresh={() => loadStatsData(true)}
+      />
+    );
+  }
+
   function renderSettings() {
     return <SettingsScreen settings={settings} setSettings={setSettings} t={t} />;
   }
@@ -2590,6 +2641,7 @@ function App() {
       case 'info': return renderInfo();
       case 'news': return renderNews();
       case 'news-detail': return renderNewsDetail();
+      case 'stats': return renderStats();
       case 'links': return renderLinks();
       case 'settings': return renderSettings();
       case 'about': return renderAbout();
@@ -2695,6 +2747,8 @@ function App() {
       actions.push({ key: 'refresh', icon: 'refresh', label: t('plan.refresh'), onClick: () => void loadInfoData(true), active: false });
     } else if (screen === 'news') {
       actions.push({ key: 'refresh', icon: 'refresh', label: t('plan.refresh'), onClick: () => void loadNewsData(true), active: false });
+    } else if (screen === 'stats') {
+      actions.push({ key: 'refresh', icon: 'refresh', label: t('stats.refresh'), onClick: () => void loadStatsData(true), active: statsLoading });
     }
 
     const hasSearchFilter = screen === 'plan' && !!planSearchQ.trim();
@@ -2936,12 +2990,6 @@ function App() {
             </div>
 
             <div className="drawer-footer">
-              {canOpenStats && (
-                <button type="button" className="drawer-stats" onClick={() => void openStatsPage()}>
-                  <Ic n="stats" />
-                  {t('drawer.stats')}
-                </button>
-              )}
               <button type="button" className="drawer-logout" onClick={() => { if (window.confirm(t('logout.confirm'))) { applySession(null); setDrawerOpen(false); } }}>
                 <Ic n="logout" />
                 {t('logout.button')}

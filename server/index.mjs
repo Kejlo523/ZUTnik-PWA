@@ -14,7 +14,6 @@ import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
 import { Agent } from 'undici';
 import { createStatsService } from './stats/service.mjs';
-import { renderStatsPage } from './stats/page.mjs';
 import {
   REQUIRED_USOS_SCOPES,
   asArray,
@@ -258,6 +257,12 @@ function clearStatsAccessCookie(req, res) {
 
 function redirectToAppHome(res) {
   return res.redirect(APP_HOME_PATH);
+}
+
+function setPrivateNoStore(res) {
+  res.set('Cache-Control', 'no-store, no-cache, must-revalidate, private');
+  res.set('Pragma', 'no-cache');
+  res.set('Expires', '0');
 }
 
 async function fetchWithTimeout(url, options = {}) {
@@ -896,6 +901,7 @@ app.post('/api/usos/me', async (req, res) => {
 });
 
 app.post('/api/stats/access', async (req, res) => {
+  setPrivateNoStore(res);
   try {
     const { token, secret } = getUsosCredentials(req);
     const user = await fetchUsosJson('services/users/user', {
@@ -919,6 +925,28 @@ app.post('/api/stats/access', async (req, res) => {
 
     setStatsAccessCookie(req, res, accessToken);
     return res.json({ ok: true, url: STATS_ROUTE_PATH });
+  } catch (error) {
+    return sendUsosError(res, error);
+  }
+});
+
+app.post('/api/stats/snapshot', async (req, res) => {
+  try {
+    const { token, secret } = getUsosCredentials(req);
+    const user = await fetchUsosJson('services/users/user', {
+      token,
+      secret,
+      tokenMode: 'required',
+      params: { fields: 'id|student_number' },
+    });
+
+    const album = normalizeStatsAlbum(firstNonEmpty(user?.student_number, user?.id));
+    if (album !== STATS_ALLOWED_ALBUM) {
+      return res.status(403).json({ error: 'Brak dostępu do statystyk.' });
+    }
+
+    setPrivateNoStore(res);
+    return res.json({ ok: true, snapshot: statsService.getSnapshot() });
   } catch (error) {
     return sendUsosError(res, error);
   }
@@ -1333,16 +1361,13 @@ app.get('/api/proxy/calendar', async (_req, res) => {
 });
 
 app.get([STATS_ROUTE_PATH, `${STATS_ROUTE_PATH}/`], statsAccessLimiter, (req, res) => {
-  res.set('Cache-Control', 'no-store, no-cache, must-revalidate');
+  setPrivateNoStore(res);
   if (!hasValidStatsAccess(req)) {
     clearStatsAccessCookie(req, res);
     return redirectToAppHome(res);
   }
 
-  return res.type('html').send(renderStatsPage({
-    snapshot: statsService.getSnapshot(),
-    appHomePath: APP_HOME_PATH,
-  }));
+  return res.redirect(`${APP_HOME_PATH}?screen=stats`);
 });
 
 const distPath = path.resolve(process.cwd(), 'dist');

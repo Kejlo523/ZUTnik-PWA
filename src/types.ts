@@ -155,6 +155,68 @@ export interface NewsItem {
   thumbUrl: string;
 }
 
+export interface StatsSeriesDay {
+  key: string;
+  labelShort: string;
+  labelLong: string;
+  activeDevices: number;
+  successfulLogins: number;
+  newDevices: number;
+}
+
+export interface StatsKpis {
+  todayActiveDevices: number;
+  uniqueActive30d: number;
+  returningDevices30d: number;
+  returningShare30d: number;
+  newDevices30d: number;
+  successfulLoginsToday: number;
+  successfulLoginsTotal: number;
+  totalDevices: number;
+  totalApiHits: number;
+  averageActive7d: number;
+  averageLogins7d: number;
+  todayDeltaActive: number;
+  todayDeltaLogins: number;
+  newDevicesToday: number;
+}
+
+export interface StatsPeak {
+  label: string;
+  value: number;
+}
+
+export interface StatsCountShare {
+  key?: string;
+  label: string;
+  count: number;
+  share: number;
+}
+
+export interface StatsSnapshot {
+  series: StatsSeriesDay[];
+  kpis: StatsKpis;
+  peaks: {
+    active: StatsPeak | null;
+    logins: StatsPeak | null;
+  };
+  topDays: Array<StatsSeriesDay & { summaryLabel: string }>;
+  recentRows: StatsSeriesDay[];
+  activeMix: StatsCountShare[];
+  loginMethods: StatsCountShare[];
+  loginMethodCoverage: {
+    recordedTotal: number;
+    overallTotal: number;
+    isPartial: boolean;
+  };
+  meta: {
+    todayKey: string;
+    trackedSinceLabel: string;
+    updatedAtLabel: string;
+    chartMax: number;
+  };
+}
+
 export interface PlanEventUi {
   startMin: number;
   endMin: number;
@@ -236,6 +298,7 @@ export type ScreenKey =
   | 'info'
   | 'news'
   | 'news-detail'
+  | 'stats'
   | 'links'
   | 'settings'
   | 'about';

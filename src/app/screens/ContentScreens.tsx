@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type Dispatch, type MutableRefObject, type SetStateAction, type TouchEvent } from 'react';
 
-import type { NewsItem, UsefulLink } from '../../types';
+import type { NewsItem, StatsCountShare, StatsSeriesDay, StatsSnapshot, UsefulLink } from '../../types';
 import type { AppSettings } from '../../services/storage';
 import type { TranslateFn } from '../viewTypes';
 import { LOGO_SRC } from '../constants';
@@ -96,6 +96,256 @@ function sameNewsImage(left: string, right: string): boolean {
   } catch {
     return left === right;
   }
+}
+
+function statsLocale(language: string): string {
+  return language === 'en' ? 'en-US' : 'pl-PL';
+}
+
+function fmtStatsInt(value: number, language: string): string {
+  const number = Number(value);
+  return new Intl.NumberFormat(statsLocale(language)).format(Number.isFinite(number) ? Math.round(number) : 0);
+}
+
+function fmtStatsAvg(value: number, language: string): string {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return language === 'en' ? '0.0' : '0,0';
+  return number.toFixed(1).replace('.', language === 'en' ? '.' : ',');
+}
+
+function fmtStatsPercent(value: number, language: string): string {
+  const number = Number(value);
+  if (!Number.isFinite(number) || number <= 0) return '0%';
+  const digits = number < 10 ? 1 : 0;
+  return `${number.toFixed(digits).replace('.', language === 'en' ? '.' : ',')}%`;
+}
+
+function fmtStatsDelta(value: number, language: string): string {
+  const number = Number(value);
+  if (!Number.isFinite(number) || number === 0) return '0';
+  return `${number > 0 ? '+' : ''}${fmtStatsInt(number, language)}`;
+}
+
+function statsNiceMax(value: number): number {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric) || numeric <= 1) return 1;
+  const magnitude = 10 ** Math.floor(Math.log10(numeric));
+  const normalized = numeric / magnitude;
+  if (normalized <= 1) return magnitude;
+  if (normalized <= 2) return magnitude * 2;
+  if (normalized <= 5) return magnitude * 5;
+  return magnitude * 10;
+}
+
+function buildStatsLinePath(points: Array<{ x: number; y: number }>): string {
+  return points.map((point, index) => `${index === 0 ? 'M' : 'L'} ${point.x} ${point.y}`).join(' ');
+}
+
+function buildStatsAreaPath(points: Array<{ x: number; y: number }>, baselineY: number): string {
+  if (!points.length) return '';
+  const last = points[points.length - 1];
+  const first = points[0];
+  return `${buildStatsLinePath(points)} L ${last.x} ${baselineY} L ${first.x} ${baselineY} Z`;
+}
+
+function StatsKpiCard({ label, value, note }: { label: string; value: string; note: string }) {
+  return (
+    <article className="stats-kpi-card">
+      <div className="stats-kpi-label">{label}</div>
+      <div className="stats-kpi-value">{value}</div>
+      <div className="stats-kpi-note">{note}</div>
+    </article>
+  );
+}
+
+function StatsLegend({ items }: { items: Array<{ label: string; className: string }> }) {
+  return (
+    <div className="stats-legend">
+      {items.map((item) => (
+        <div key={item.label} className="stats-legend-item">
+          <span className={`stats-legend-swatch ${item.className}`} />
+          <span>{item.label}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function StatsActivityChart({ series, language }: { series: StatsSeriesDay[]; language: string }) {
+  const width = 880;
+  const height = 320;
+  const padding = { top: 16, right: 18, bottom: 40, left: 44 };
+  const innerWidth = width - padding.left - padding.right;
+  const innerHeight = height - padding.top - padding.bottom;
+  const chartMax = statsNiceMax(Math.max(1, ...series.flatMap((day) => [day.activeDevices, day.successfulLogins])));
+  const step = series.length > 1 ? innerWidth / (series.length - 1) : innerWidth;
+  const barSlot = innerWidth / Math.max(1, series.length);
+  const barWidth = Math.max(10, Math.min(16, barSlot * 0.62));
+  const pointFor = (index: number, value: number) => {
+    const ratio = chartMax > 0 ? value / chartMax : 0;
+    return {
+      x: Math.round((padding.left + (series.length > 1 ? index * step : innerWidth / 2)) * 100) / 100,
+      y: Math.round((padding.top + innerHeight - ratio * innerHeight) * 100) / 100,
+    };
+  };
+  const loginPoints = series.map((day, index) => pointFor(index, day.successfulLogins));
+  const gridLines = Array.from({ length: 5 }, (_, index) => {
+    const ratio = index / 4;
+    const value = Math.round(chartMax * (1 - ratio));
+    const y = Math.round((padding.top + innerHeight * ratio) * 100) / 100;
+    return { value, y };
+  });
+  const xLabels = series
+    .map((day, index) => ({ day, index }))
+    .filter(({ index }) => index === 0 || index === series.length - 1 || index % 5 === 0);
+
+  return (
+    <svg viewBox={`0 0 ${width} ${height}`} className="stats-chart-svg" role="img" aria-label="Aktywne urządzenia oraz poprawne logowania z ostatnich 30 dni">
+      {gridLines.map((line) => (
+        <g key={line.y} className="stats-chart-grid-row">
+          <line x1={padding.left} y1={line.y} x2={width - padding.right} y2={line.y} />
+          <text x={padding.left - 10} y={line.y + 4} textAnchor="end">{fmtStatsInt(line.value, language)}</text>
+        </g>
+      ))}
+      {series.map((day, index) => {
+        const point = pointFor(index, day.activeDevices);
+        const barHeight = Math.max(4, padding.top + innerHeight - point.y);
+        const barX = point.x - barWidth / 2;
+        const barY = padding.top + innerHeight - barHeight;
+        return (
+          <g key={day.key} className="stats-chart-bar-group">
+            <title>{`${day.labelLong}: aktywne ${day.activeDevices}, logowania ${day.successfulLogins}`}</title>
+            <rect className={`stats-chart-bar${index === series.length - 1 ? ' is-today' : ''}`} x={barX} y={barY} width={barWidth} height={barHeight} rx="6" />
+          </g>
+        );
+      })}
+      <path className="stats-chart-line" d={buildStatsLinePath(loginPoints)} />
+      {loginPoints.map((point, index) => (
+        <g key={`${series[index]?.key ?? index}-point`} className="stats-chart-point-wrap">
+          <title>{`${series[index]?.labelLong ?? ''}: logowania ${series[index]?.successfulLogins ?? 0}`}</title>
+          <circle className="stats-chart-point" cx={point.x} cy={point.y} r={index === series.length - 1 ? 4.5 : 3.5} />
+        </g>
+      ))}
+      {xLabels.map(({ day, index }) => {
+        const point = pointFor(index, 0);
+        return <text key={`${day.key}-label`} className="stats-chart-x-label" x={point.x} y={height - 10} textAnchor="middle">{day.labelShort}</text>;
+      })}
+    </svg>
+  );
+}
+
+function StatsNewDevicesChart({ series, language }: { series: StatsSeriesDay[]; language: string }) {
+  const width = 540;
+  const height = 220;
+  const padding = { top: 14, right: 16, bottom: 32, left: 36 };
+  const innerWidth = width - padding.left - padding.right;
+  const innerHeight = height - padding.top - padding.bottom;
+  const chartMax = statsNiceMax(Math.max(1, ...series.map((day) => day.newDevices)));
+  const step = series.length > 1 ? innerWidth / (series.length - 1) : innerWidth;
+  const pointFor = (index: number, value: number) => {
+    const ratio = chartMax > 0 ? value / chartMax : 0;
+    return {
+      x: Math.round((padding.left + (series.length > 1 ? index * step : innerWidth / 2)) * 100) / 100,
+      y: Math.round((padding.top + innerHeight - ratio * innerHeight) * 100) / 100,
+    };
+  };
+  const points = series.map((day, index) => pointFor(index, day.newDevices));
+  const gridLines = Array.from({ length: 4 }, (_, index) => {
+    const ratio = index / 3;
+    const value = Math.round(chartMax * (1 - ratio));
+    const y = Math.round((padding.top + innerHeight * ratio) * 100) / 100;
+    return { value, y };
+  });
+  const xLabels = series
+    .map((day, index) => ({ day, index }))
+    .filter(({ index }) => index === 0 || index === series.length - 1 || index % 6 === 0);
+
+  return (
+    <svg viewBox={`0 0 ${width} ${height}`} className="stats-chart-svg compact" role="img" aria-label="Nowe urządzenia z ostatnich 30 dni">
+      {gridLines.map((line) => (
+        <g key={line.y} className="stats-chart-grid-row subtle">
+          <line x1={padding.left} y1={line.y} x2={width - padding.right} y2={line.y} />
+          <text x={padding.left - 10} y={line.y + 4} textAnchor="end">{fmtStatsInt(line.value, language)}</text>
+        </g>
+      ))}
+      <path className="stats-chart-area-soft" d={buildStatsAreaPath(points, padding.top + innerHeight)} />
+      <path className="stats-chart-line warm" d={buildStatsLinePath(points)} />
+      {points.map((point, index) => (
+        <g key={`${series[index]?.key ?? index}-new-point`} className="stats-chart-point-wrap">
+          <title>{`${series[index]?.labelLong ?? ''}: nowe urządzenia ${series[index]?.newDevices ?? 0}`}</title>
+          <circle className="stats-chart-point warm" cx={point.x} cy={point.y} r={index === points.length - 1 ? 4 : 3} />
+        </g>
+      ))}
+      {xLabels.map(({ day, index }) => {
+        const point = pointFor(index, 0);
+        return <text key={`${day.key}-new-label`} className="stats-chart-x-label" x={point.x} y={height - 8} textAnchor="middle">{day.labelShort}</text>;
+      })}
+    </svg>
+  );
+}
+
+function StatsTopDays({ days, language }: { days: Array<StatsSeriesDay & { summaryLabel: string }>; language: string }) {
+  return (
+    <div className="stats-rank-list">
+      {days.map((day, index) => (
+        <div key={day.key} className="stats-rank-item">
+          <div className="stats-rank-index">{index + 1}</div>
+          <div className="stats-rank-copy">
+            <div className="stats-rank-title">{day.summaryLabel}</div>
+            <div className="stats-rank-meta">Aktywne: <strong>{fmtStatsInt(day.activeDevices, language)}</strong> · Logowania: <strong>{fmtStatsInt(day.successfulLogins, language)}</strong></div>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function StatsBarList({ items, countLabel, language }: { items: StatsCountShare[]; countLabel: string; language: string }) {
+  const rows = items.length ? items : [{ label: 'Brak danych', count: 0, share: 0 }];
+  const maxCount = Math.max(1, ...rows.map((item) => item.count));
+  return (
+    <div className="stats-bar-list">
+      {rows.map((item) => (
+        <div key={item.key ?? item.label} className="stats-bar-row">
+          <div className="stats-bar-head">
+            <span>{item.label}</span>
+            <span>{fmtStatsInt(item.count, language)} {countLabel}</span>
+          </div>
+          <div className="stats-bar-track">
+            <div className="stats-bar-fill" style={{ width: `${Math.max(4, (item.count / maxCount) * 100)}%` }} />
+          </div>
+          <div className="stats-bar-foot">{fmtStatsPercent(item.share, language)}</div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function StatsRecentTable({ rows, language }: { rows: StatsSeriesDay[]; language: string }) {
+  return (
+    <div className="stats-table-wrap">
+      <table className="stats-table">
+        <thead>
+          <tr>
+            <th>Dzień</th>
+            <th>Aktywne</th>
+            <th>Nowe</th>
+            <th>Logowania</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row) => (
+            <tr key={row.key}>
+              <td>{row.labelLong}</td>
+              <td>{fmtStatsInt(row.activeDevices, language)}</td>
+              <td>{fmtStatsInt(row.newDevices, language)}</td>
+              <td>{fmtStatsInt(row.successfulLogins, language)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
 }
 
 function prepareNewsDetailContent(html: string, fallbackImageUrl = ''): { html: string; images: NewsDetailImage[] } {
@@ -528,6 +778,200 @@ export function LinksScreen({ links, t }: LinksScreenProps) {
           <div className="link-card-desc">{l.description}</div>
         </a>
       ))}
+    </section>
+  );
+}
+
+interface StatsScreenProps {
+  snapshot: StatsSnapshot | null;
+  statsLoading: boolean;
+  statsError: string;
+  language: AppSettings['language'];
+  t: TranslateFn;
+  onRefresh: () => Promise<void> | void;
+}
+
+function StatsLoadingSkeleton() {
+  return (
+    <section className="screen stats-screen">
+      <div className="stats-hero stats-hero-loading">
+        <Skeleton className="skeleton-line skeleton-line-sm" style={{ width: '140px' }} />
+        <Skeleton className="skeleton-line skeleton-line-md" style={{ width: '260px' }} />
+        <div className="stats-kpi-grid">
+          {Array.from({ length: 4 }).map((_, index) => (
+            <div key={index} className="stats-kpi-card" aria-hidden>
+              <Skeleton className="skeleton-line skeleton-line-xs" style={{ width: '62%' }} />
+              <Skeleton className="skeleton-line skeleton-line-md" style={{ width: '44%' }} />
+              <Skeleton className="skeleton-line skeleton-line-xs" style={{ width: '72%' }} />
+            </div>
+          ))}
+        </div>
+      </div>
+      <div className="stats-grid-main">
+        <div className="stats-panel stats-panel-large" aria-hidden>
+          <Skeleton className="skeleton-line skeleton-line-md" style={{ width: '220px' }} />
+          <Skeleton className="stats-chart-skeleton" />
+        </div>
+        <div className="stats-side-stack" aria-hidden>
+          <Skeleton className="stats-side-skeleton" />
+          <Skeleton className="stats-side-skeleton" />
+        </div>
+      </div>
+    </section>
+  );
+}
+
+export function StatsScreen({ snapshot, statsLoading, statsError, language, t, onRefresh }: StatsScreenProps) {
+  if (statsLoading && !snapshot) {
+    return <StatsLoadingSkeleton />;
+  }
+
+  if (!snapshot) {
+    return (
+      <section className="screen stats-screen">
+        <div className="stats-state-panel">
+          <div className="stats-state-icon"><Ic n="stats" /></div>
+          <div>
+            <h2>{t('stats.unavailableTitle')}</h2>
+            <p>{statsError || t('stats.unavailableCopy')}</p>
+          </div>
+          <button type="button" className="stats-refresh-btn" onClick={() => void onRefresh()}>
+            <Ic n="refresh" />
+            {t('stats.refresh')}
+          </button>
+        </div>
+      </section>
+    );
+  }
+
+  const { kpis, meta, peaks, series, topDays, activeMix, loginMethods, loginMethodCoverage, recentRows } = snapshot;
+  const activityCoverage = kpis.totalDevices > 0 ? (kpis.uniqueActive30d / kpis.totalDevices) * 100 : 0;
+  const methodsWithFallback = loginMethods.some((item) => item.count > 0)
+    ? loginMethods
+    : [{ key: 'none', label: t('stats.noData'), count: 0, share: 0 }];
+
+  return (
+    <section className="screen stats-screen">
+      <div className="stats-hero">
+        <div className="stats-hero-top">
+          <div>
+            <div className="stats-eyebrow">{t('stats.eyebrow')}</div>
+            <h2>{t('stats.title')}</h2>
+            <p>{t('stats.copy')}</p>
+          </div>
+          <button type="button" className={`stats-refresh-btn${statsLoading ? ' is-loading' : ''}`} onClick={() => void onRefresh()} disabled={statsLoading}>
+            <Ic n="refresh" />
+            {t('stats.refresh')}
+          </button>
+        </div>
+
+        <div className="stats-meta-line">
+          <span>{t('stats.updated')}: <strong>{meta.updatedAtLabel}</strong></span>
+          <span>{t('stats.trackedSince')}: <strong>{meta.trackedSinceLabel}</strong></span>
+          <span>{t('stats.totalDevices')}: <strong>{fmtStatsInt(kpis.totalDevices, language)}</strong></span>
+          <span>{t('stats.apiHits')}: <strong>{fmtStatsInt(kpis.totalApiHits, language)}</strong></span>
+        </div>
+
+        <div className="stats-kpi-grid">
+          <StatsKpiCard label={t('stats.activeToday')} value={fmtStatsInt(kpis.todayActiveDevices, language)} note={`${fmtStatsDelta(kpis.todayDeltaActive, language)} ${t('stats.vsYesterday')}`} />
+          <StatsKpiCard label={t('stats.loginsToday')} value={fmtStatsInt(kpis.successfulLoginsToday, language)} note={`${fmtStatsDelta(kpis.todayDeltaLogins, language)} ${t('stats.vsYesterday')}`} />
+          <StatsKpiCard label={t('stats.unique30d')} value={fmtStatsInt(kpis.uniqueActive30d, language)} note={`${fmtStatsPercent(activityCoverage, language)} ${t('stats.ofBase')}`} />
+          <StatsKpiCard label={t('stats.returning30d')} value={fmtStatsInt(kpis.returningDevices30d, language)} note={`${fmtStatsPercent(kpis.returningShare30d, language)} ${t('stats.ofActive')}`} />
+        </div>
+      </div>
+
+      <div className="stats-grid-main">
+        <article className="stats-panel stats-panel-large">
+          <div className="stats-panel-head">
+            <div>
+              <div className="stats-panel-kicker">{t('stats.last30d')}</div>
+              <h3>{t('stats.activityTitle')}</h3>
+            </div>
+            <div className="stats-chip">
+              <span>{t('stats.avgActive7d')}</span>
+              <strong>{fmtStatsAvg(kpis.averageActive7d, language)}</strong>
+            </div>
+          </div>
+          <div className="stats-chart-shell">
+            <StatsLegend items={[
+              { label: t('stats.activeDevices'), className: 'bar-active' },
+              { label: t('stats.successfulLogins'), className: 'line-logins' },
+            ]} />
+            <StatsActivityChart series={series} language={language} />
+          </div>
+          <div className="stats-inline-note">
+            {t('stats.peakActive')}: <strong>{peaks.active ? `${fmtStatsInt(peaks.active.value, language)} · ${peaks.active.label}` : t('stats.noData')}</strong>
+          </div>
+        </article>
+
+        <aside className="stats-side-stack">
+          <article className="stats-panel">
+            <div className="stats-panel-head compact">
+              <div>
+                <div className="stats-panel-kicker">{t('stats.ranking')}</div>
+                <h3>{t('stats.topDays')}</h3>
+              </div>
+            </div>
+            <StatsTopDays days={topDays} language={language} />
+          </article>
+
+          <article className="stats-panel">
+            <div className="stats-panel-head compact">
+              <div>
+                <div className="stats-panel-kicker">{t('stats.auth')}</div>
+                <h3>{t('stats.loginSources')}</h3>
+              </div>
+            </div>
+            <StatsBarList items={methodsWithFallback} countLabel={t('stats.loginsCount')} language={language} />
+            {loginMethodCoverage.isPartial && (
+              <div className="stats-inline-note">{t('stats.partialMethods')}</div>
+            )}
+          </article>
+        </aside>
+      </div>
+
+      <div className="stats-detail-grid">
+        <article className="stats-panel">
+          <div className="stats-panel-head">
+            <div>
+              <div className="stats-panel-kicker">{t('stats.acquisition')}</div>
+              <h3>{t('stats.newDevices')}</h3>
+            </div>
+            <div className="stats-chip">
+              <span>{t('stats.today')}</span>
+              <strong>{fmtStatsInt(kpis.newDevicesToday, language)}</strong>
+            </div>
+          </div>
+          <div className="stats-chart-shell">
+            <StatsLegend items={[{ label: t('stats.newDevices'), className: 'line-new' }]} />
+            <StatsNewDevicesChart series={series} language={language} />
+          </div>
+        </article>
+
+        <article className="stats-panel">
+          <div className="stats-panel-head compact">
+            <div>
+              <div className="stats-panel-kicker">{t('stats.retention')}</div>
+              <h3>{t('stats.returning')}</h3>
+            </div>
+          </div>
+          <StatsBarList items={activeMix} countLabel={t('stats.devicesCount')} language={language} />
+        </article>
+      </div>
+
+      <article className="stats-panel">
+        <div className="stats-panel-head">
+          <div>
+            <div className="stats-panel-kicker">{t('stats.recent')}</div>
+            <h3>{t('stats.last7d')}</h3>
+          </div>
+          <div className="stats-chip">
+            <span>{t('stats.avgLogins7d')}</span>
+            <strong>{fmtStatsAvg(kpis.averageLogins7d, language)}</strong>
+          </div>
+        </div>
+        <StatsRecentTable rows={recentRows} language={language} />
+      </article>
     </section>
   );
 }

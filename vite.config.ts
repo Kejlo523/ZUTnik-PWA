@@ -21,9 +21,18 @@ function escapeRegex(value: string): string {
 }
 
 const scopedApiPrefix = appBase === '/' ? '/api/' : `${appBaseNoSlash}/api/`;
+const scopedStatsApiPrefix = `${scopedApiPrefix}stats`;
+const apiRuntimePattern = new RegExp(`^https?://[^/]+(${escapeRegex(scopedApiPrefix)}|/api/)`);
 const apiDenylist = appBase === '/'
   ? [/^\/api\//, /^\/stats\/?$/]
   : [new RegExp(`^${escapeRegex(scopedApiPrefix)}`), /^\/api\//, new RegExp(`^${escapeRegex(statsPath)}\\/?$`)];
+
+function isStatsApiPath(pathname: string): boolean {
+  return pathname === '/api/stats'
+    || pathname.startsWith('/api/stats/')
+    || pathname === scopedStatsApiPrefix.replace(/\/+$/, '')
+    || pathname.startsWith(`${scopedStatsApiPrefix}/`);
+}
 
 export default defineConfig({
   base: appBase,
@@ -89,7 +98,11 @@ export default defineConfig({
             },
           },
           {
-            urlPattern: new RegExp(`^https?://[^/]+(${escapeRegex(scopedApiPrefix)}|/api/)`),
+            urlPattern: ({ request, url }) => (
+              request.method === 'GET'
+              && apiRuntimePattern.test(url.href)
+              && !isStatsApiPath(url.pathname)
+            ),
             handler: 'NetworkFirst',
             options: {
               cacheName: 'api-cache',

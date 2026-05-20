@@ -10,6 +10,7 @@ import type {
   SessionData,
   SessionPeriod,
   Semester,
+  StatsSnapshot,
   Study,
   StudyDetails,
   StudyHistoryItem,
@@ -503,6 +504,38 @@ export async function requestStatsAccess(session: SessionData): Promise<string> 
   }
 
   return firstNonEmpty(body.url, `${import.meta.env.BASE_URL}stats`);
+}
+
+export async function fetchStatsSnapshot(session: SessionData): Promise<StatsSnapshot> {
+  if (!session.usos?.accessToken || !session.usos.accessTokenSecret) {
+    throw new SessionExpiredError();
+  }
+
+  const response = await apiFetch(`${API_BASE}/stats/snapshot`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      token: session.usos.accessToken,
+      secret: session.usos.accessTokenSecret,
+      scopes: session.usos.scopes ?? [],
+    }),
+  });
+  const body = (await response.json().catch(() => ({}))) as { snapshot?: StatsSnapshot; error?: string };
+
+  if (!response.ok) {
+    const errorMessage = body.error || `Stats snapshot HTTP ${response.status}`;
+    if (hasHttpAuthError(response.status, errorMessage)) {
+      throw new SessionExpiredError();
+    }
+    throw new Error(errorMessage);
+  }
+
+  if (!body.snapshot) {
+    throw new Error('Brak danych statystyk.');
+  }
+
+  return body.snapshot;
 }
 
 export async function fetchStudentPhotoBlob(session: SessionData): Promise<Blob | null> {

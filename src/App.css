@@ -5861,7 +5861,7 @@ button.outline {
 }
 
 .notification-stack {
-  width: min(100%, 540px);
+  width: min(100%, 500px);
   margin: 0 auto;
   display: flex;
   flex-direction: column;
@@ -5869,19 +5869,19 @@ button.outline {
 }
 
 .banner {
-  border-radius: 18px;
-  padding: 12px 14px;
+  border-radius: 20px;
+  padding: 12px;
   font-size: 13px;
   font-weight: 500;
   background: var(--mz-banner-bg);
   color: var(--mz-banner-text);
   border: 1px solid var(--mz-banner-border);
-  box-shadow: 0 12px 30px rgba(0, 0, 0, .28);
+  box-shadow: 0 18px 44px rgba(0, 0, 0, .34);
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
   display: flex;
   align-items: flex-start;
-  gap: 10px;
+  gap: 12px;
   animation: banner-in 200ms ease-out;
   pointer-events: auto;
 }
@@ -5902,16 +5902,26 @@ button.outline {
 .banner-title {
   line-height: 1.45;
   color: inherit;
+  overflow-wrap: anywhere;
+}
+
+.banner-kicker {
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1.2;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: var(--mz-muted);
 }
 
 .banner-icon {
-  width: 22px;
-  height: 22px;
+  width: 30px;
+  height: 30px;
   border-radius: 999px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 800;
   flex-shrink: 0;
   line-height: 1;
@@ -5946,6 +5956,23 @@ button.outline {
   background: var(--mz-banner-error-bg);
   color: var(--mz-banner-error-text);
   border-color: var(--mz-banner-error-border);
+  align-items: center;
+}
+
+.banner.error .banner-icon {
+  margin-top: 0;
+  background: rgba(255, 82, 82, 0.16);
+  box-shadow: inset 0 0 0 1px rgba(255, 82, 82, 0.24);
+}
+
+.banner.error .banner-title {
+  display: -webkit-box;
+  max-height: 5.8em;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 4;
+  font-size: 13px;
+  font-weight: 700;
 }
 
 .banner-close,
@@ -5956,6 +5983,7 @@ button.outline {
   border: 1px solid var(--mz-banner-action-border);
   color: inherit;
   border-radius: 999px;
+  min-height: 34px;
   padding: 7px 12px;
   font-size: 12px;
   font-weight: 600;

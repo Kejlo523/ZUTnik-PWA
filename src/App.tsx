@@ -38,6 +38,7 @@ import {
   fetchStudentPhotoBlob,
   fetchSurveysToFill,
   fetchUsosRequestToken,
+  getFriendlyErrorMessage,
   isSessionExpiredError,
   loginWithUsos,
   savePlanHiddenSubjects as savePlanHiddenSubjectsByAlbum,
@@ -518,6 +519,9 @@ function App() {
   }, [session, sessionKey]);
 
   const showToast = useCallback((msg: string) => setToast(msg), []);
+  const showGlobalError = useCallback((error: unknown, fallback?: string) => {
+    setGlobalError(getFriendlyErrorMessage(error, fallback));
+  }, []);
 
   const setPlanHiddenSubjectsForAlbum = useCallback((album: string, keys: string[]) => {
     const normalizedAlbum = album.trim();
@@ -893,10 +897,10 @@ function App() {
           showToast('Zalogowano przez USOS');
           sessionStorage.removeItem('usos_request_token_secret');
         })
-        .catch(e => setGlobalError(e instanceof Error ? e.message : 'Błąd logowania USOS.'))
+        .catch(e => showGlobalError(e, 'Błąd logowania USOS.'))
         .finally(() => setGlobalLoad(false));
     }
-  }, [applySession, schedulePhoneViewportRefresh, showToast]);
+  }, [applySession, schedulePhoneViewportRefresh, showGlobalError, showToast]);
 
   const updateActiveStudy = useCallback((id: string | null) => {
     setSession(prev => (prev ? { ...prev, activeStudyId: id } : prev));
@@ -931,12 +935,12 @@ function App() {
       } catch (e) {
         if (handleSessionError(e)) return;
         if (cached.length && cachedIsOnlyFallback) setStudies(cached);
-        if (!cached.length || cachedIsOnlyFallback) setGlobalError(e instanceof Error ? e.message : 'Nie można pobrać kierunków.');
+        if (!cached.length || cachedIsOnlyFallback) showGlobalError(e, 'Nie można pobrać kierunków.');
       } finally {
         setGlobalLoad(false);
       }
     }
-  }, [ensureSessionStillValid, handleSessionError, updateActiveStudy]);
+  }, [ensureSessionStillValid, handleSessionError, showGlobalError, updateActiveStudy]);
 
   useEffect(() => {
     if (!session) { setStudies([]); return; }
@@ -1103,9 +1107,8 @@ function App() {
     } catch (e) {
       if (planRequestIdRef.current === requestId) {
         if (handleSessionError(e)) return;
-        const errorMsg = e instanceof Error ? e.message : 'Nie można pobrać planu.';
         if (!planResult) {
-          setGlobalError(errorMsg);
+          showGlobalError(e, 'Nie można pobrać planu.');
         }
       }
     } finally {
@@ -1121,6 +1124,7 @@ function App() {
     planResult,
     resolveActivePlanSearch,
     loadPlanWindowData,
+    showGlobalError,
     ensureSessionStillValid,
     handleSessionError,
     loadPersistedPlanHiddenSubjects,
@@ -1318,14 +1322,13 @@ function App() {
       }
     } catch (e) {
       if (handleSessionError(e)) return;
-      const errorMsg = e instanceof Error ? e.message : 'Nie można pobrać ocen.';
       if (!grades.length) {
-        setGlobalError(errorMsg);
+        showGlobalError(e, 'Nie można pobrać ocen.');
       }
     } finally {
       setGradesLoad(false);
     }
-  }, [session, activeStudyId, selSemId, grades.length, ensureSessionStillValid, handleSessionError, loadCourseTestsData]);
+  }, [session, activeStudyId, selSemId, grades.length, ensureSessionStillValid, handleSessionError, loadCourseTestsData, showGlobalError]);
 
   const loadFinanceData = useCallback(async (forceRefresh = false) => {
     if (!session || !activeStudyId) {
@@ -1352,12 +1355,12 @@ function App() {
     } catch (e) {
       if (handleSessionError(e)) return;
       if (!forced) {
-        setGlobalError(e instanceof Error ? e.message : 'Nie można pobrać finansów.');
+        showGlobalError(e, 'Nie można pobrać finansów.');
       }
     } finally {
       setFinanceLoading(false);
     }
-  }, [session, activeStudyId, ensureSessionStillValid, handleSessionError]);
+  }, [session, activeStudyId, ensureSessionStillValid, handleSessionError, showGlobalError]);
 
   const loadInfoData = useCallback(async (forceRefresh = false) => {
     if (!session || !activeStudyId) return;
@@ -1400,11 +1403,11 @@ function App() {
       setSurveysMissingScopes(payload.surveysMissingScopes ?? []);
     } catch (e) {
       if (handleSessionError(e)) return;
-      if (!forceCached) setGlobalError(e instanceof Error ? e.message : 'Nie można pobrać danych.');
+      if (!forceCached) showGlobalError(e, 'Nie można pobrać danych.');
     } finally {
       setInfoLoading(false);
     }
-  }, [session, activeStudyId, ensureSessionStillValid, handleSessionError]);
+  }, [session, activeStudyId, ensureSessionStillValid, handleSessionError, showGlobalError]);
 
   const loadNewsData = useCallback(async (forceRefresh = false) => {
     const forced = cache.loadNewsForce() ?? [];
@@ -1417,11 +1420,11 @@ function App() {
       cache.saveNews(items);
       setNews(items);
     } catch (e) {
-      if (!forced.length) setGlobalError(e instanceof Error ? e.message : 'Nie można pobrać aktualności.');
+      if (!forced.length) showGlobalError(e, 'Nie można pobrać aktualności.');
     } finally {
       setNewsLoading(false);
     }
-  }, []);
+  }, [showGlobalError]);
 
   const loadStatsData = useCallback(async (forceRefresh = false) => {
     if (!session || !canOpenStats) return;
@@ -1434,7 +1437,7 @@ function App() {
       setStatsSnapshot(snapshot);
     } catch (e) {
       if (handleSessionError(e)) return;
-      const message = e instanceof Error ? e.message : 'Nie można pobrać statystyk.';
+      const message = getFriendlyErrorMessage(e, 'Nie można pobrać statystyk.');
       setStatsError(message);
       if (!statsSnapshot) setGlobalError(message);
     } finally {
@@ -1765,7 +1768,7 @@ function App() {
         showToast('Wyeksportowano cały semestr do pliku ICS');
       } catch (error) {
         if (!handleSessionError(error)) {
-          setGlobalError(error instanceof Error ? error.message : 'Nie udało się wyeksportować planu.');
+          showGlobalError(error, 'Nie udało się wyeksportować planu.');
         }
       } finally {
         setGlobalLoad(false);
@@ -1781,6 +1784,7 @@ function App() {
     planSearchCat,
     planSearchQ,
     session,
+    showGlobalError,
     showToast,
   ]);
 
@@ -1907,7 +1911,7 @@ function App() {
             sessionStorage.setItem('usos_request_token_secret', oauth_token_secret);
             window.location.href = `https://usosapi.zut.edu.pl/services/oauth/authorize?oauth_token=${oauth_token}`;
           } catch (e) {
-            setGlobalError(e instanceof Error ? e.message : 'Błąd inicjacji USOS.');
+            showGlobalError(e, 'Błąd inicjacji USOS.');
             setGlobalLoad(false);
           }
         }}
@@ -2888,11 +2892,12 @@ function App() {
             )}
             {globalError && (
               <div className="banner error" role="alert">
-                <span className="banner-icon">!</span>
+                <span className="banner-icon" aria-hidden="true">!</span>
                 <div className="banner-copy">
+                  <span className="banner-kicker">Nie udało się pobrać danych</span>
                   <span className="banner-title">{globalError}</span>
                 </div>
-                <button type="button" className="banner-retry" onClick={() => setGlobalError('')}>OK</button>
+                <button type="button" className="banner-retry" onClick={() => setGlobalError('')}>Zamknij</button>
               </div>
             )}
           </div>

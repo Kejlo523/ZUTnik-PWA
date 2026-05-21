@@ -94,6 +94,55 @@ function hasHttpAuthError(status: number, message: string): boolean {
     || normalized.includes('token rejected');
 }
 
+function decodeCommonHtmlEntities(value: string): string {
+  return value
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/gi, "'");
+}
+
+function cleanErrorText(value: string): string {
+  return decodeCommonHtmlEntities(value)
+    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+export function getFriendlyErrorMessage(error: unknown, fallback = 'Coś poszło nie tak. Spróbuj ponownie za chwilę.'): string {
+  const raw = error instanceof Error
+    ? error.message
+    : typeof error === 'string'
+      ? error
+      : fallback;
+  const rawNormalized = raw.toLowerCase();
+  const cleaned = cleanErrorText(raw);
+  const normalized = cleaned.toLowerCase();
+
+  if (!cleaned) return fallback;
+  if (
+    normalized.includes('service unavailable')
+    || normalized.includes('error 503')
+    || normalized.includes('503')
+    || normalized.includes('temporarily overloading')
+    || normalized.includes('server is temporarily')
+  ) {
+    return 'USOS jest teraz chwilowo niedostępny. Spróbuj ponownie za chwilę.';
+  }
+  if (rawNormalized.includes('doctype html') || rawNormalized.includes('<!doctype') || rawNormalized.includes('<html')) {
+    return 'Zewnętrzny serwer zwrócił nieczytelną odpowiedź. Spróbuj ponownie za chwilę.';
+  }
+  if (cleaned.length > 180) {
+    return `${cleaned.slice(0, 177).trim()}...`;
+  }
+
+  return cleaned;
+}
+
 function createApiRequestInit(init: RequestInit = {}): RequestInit {
   const headers = new Headers(init.headers ?? {});
   headers.set('X-ZUTnik-Device-Id', DEVICE_ID);
@@ -154,7 +203,7 @@ async function postUsosEndpoint<T>(usos: UsosSessionData, path: string, payload:
 
   const body = (await response.json().catch(() => ({}))) as { error?: string } & T;
   if (!response.ok) {
-    const errorMessage = body.error || `USOS API error: ${response.status}`;
+    const errorMessage = getFriendlyErrorMessage(body.error || `USOS API error: ${response.status}`);
     if (hasHttpAuthError(response.status, errorMessage)) {
       throw new SessionExpiredError();
     }
@@ -189,7 +238,7 @@ async function proxyRssXml(): Promise<string> {
   const response = await apiFetch(`${API_BASE}/proxy/rss`);
   const body = (await response.json().catch(() => ({}))) as { xml?: string; error?: string };
   if (!response.ok) {
-    throw new Error(body.error || `RSS proxy HTTP ${response.status}`);
+    throw new Error(getFriendlyErrorMessage(body.error || `RSS proxy HTTP ${response.status}`));
   }
   return body.xml || '';
 }
@@ -260,7 +309,7 @@ async function proxyPlanStudent(query: Record<string, string>): Promise<Record<s
   const response = await apiFetch(`${url.pathname}${url.search}`);
   const body = (await response.json().catch(() => ({}))) as { data?: Record<string, unknown>[]; error?: string };
   if (!response.ok) {
-    throw new Error(body.error || `Plan proxy HTTP ${response.status}`);
+    throw new Error(getFriendlyErrorMessage(body.error || `Plan proxy HTTP ${response.status}`));
   }
   return Array.isArray(body.data) ? body.data : [];
 }
@@ -282,7 +331,7 @@ export async function fetchPlanHiddenSubjects(album: string): Promise<string[]> 
   const response = await apiFetch(`${API_BASE}/plan-hidden-subjects/${encodeURIComponent(normalizedAlbum)}`);
   const body = (await response.json().catch(() => ({}))) as { hiddenSubjectKeys?: unknown; error?: string };
   if (!response.ok) {
-    throw new Error(body.error || `Plan filters HTTP ${response.status}`);
+    throw new Error(getFriendlyErrorMessage(body.error || `Plan filters HTTP ${response.status}`));
   }
 
   return normalizePlanHiddenSubjectKeys(body.hiddenSubjectKeys);
@@ -299,7 +348,7 @@ export async function savePlanHiddenSubjects(album: string, hiddenSubjectKeys: s
   });
   const body = (await response.json().catch(() => ({}))) as { hiddenSubjectKeys?: unknown; error?: string };
   if (!response.ok) {
-    throw new Error(body.error || `Plan filters HTTP ${response.status}`);
+    throw new Error(getFriendlyErrorMessage(body.error || `Plan filters HTTP ${response.status}`));
   }
 
   return normalizePlanHiddenSubjectKeys(body.hiddenSubjectKeys);
@@ -315,7 +364,7 @@ export async function fetchUsosRequestToken(callbackUrl: string): Promise<{ oaut
   url.searchParams.set('scopes', USOS_LOGIN_SCOPES);
   const response = await apiFetch(url.origin === window.location.origin ? `${url.pathname}${url.search}` : url.toString());
   const body = await response.json();
-  if (!response.ok) throw new Error(body.error || 'Błąd pobierania tokenu USOS.');
+  if (!response.ok) throw new Error(getFriendlyErrorMessage(body.error || 'Błąd pobierania tokenu USOS.'));
   return body;
 }
 
@@ -331,7 +380,7 @@ export async function loginWithUsos(verifier: string, token: string, secret: str
   });
 
   const body = await response.json();
-  if (!response.ok) throw new Error(body.error || 'Błąd logowania USOS.');
+  if (!response.ok) throw new Error(getFriendlyErrorMessage(body.error || 'Błąd logowania USOS.'));
 
   const usos: UsosSessionData = {
     accessToken: body.oauth_token,
@@ -463,7 +512,7 @@ export async function fetchSurveysToFill(session: SessionData): Promise<{ items:
 async function fetchUsosNews(): Promise<NewsItem[]> {
   const response = await apiFetch(`${API_BASE}/usos/news`);
   const body = (await response.json().catch(() => ({}))) as { items?: NewsItem[]; error?: string };
-  if (!response.ok) throw new Error(body.error || `USOS news HTTP ${response.status}`);
+  if (!response.ok) throw new Error(getFriendlyErrorMessage(body.error || `USOS news HTTP ${response.status}`));
   return ensureArray<NewsItem>(body.items);
 }
 
@@ -496,7 +545,7 @@ export async function requestStatsAccess(session: SessionData): Promise<string> 
   const body = (await response.json().catch(() => ({}))) as { url?: string; error?: string };
 
   if (!response.ok) {
-    const errorMessage = body.error || `Stats access HTTP ${response.status}`;
+    const errorMessage = getFriendlyErrorMessage(body.error || `Stats access HTTP ${response.status}`);
     if (hasHttpAuthError(response.status, errorMessage)) {
       throw new SessionExpiredError();
     }
@@ -524,7 +573,7 @@ export async function fetchStatsSnapshot(session: SessionData): Promise<StatsSna
   const body = (await response.json().catch(() => ({}))) as { snapshot?: StatsSnapshot; error?: string };
 
   if (!response.ok) {
-    const errorMessage = body.error || `Stats snapshot HTTP ${response.status}`;
+    const errorMessage = getFriendlyErrorMessage(body.error || `Stats snapshot HTTP ${response.status}`);
     if (hasHttpAuthError(response.status, errorMessage)) {
       throw new SessionExpiredError();
     }
@@ -554,7 +603,7 @@ export async function fetchStudentPhotoBlob(session: SessionData): Promise<Blob 
   if (response.status === 404) return null;
   if (!response.ok) {
     const body = (await response.json().catch(() => ({}))) as { error?: string };
-    const errorMessage = body.error || `USOS photo HTTP ${response.status}`;
+    const errorMessage = getFriendlyErrorMessage(body.error || `USOS photo HTTP ${response.status}`);
     if (hasHttpAuthError(response.status, errorMessage)) {
       throw new SessionExpiredError();
     }

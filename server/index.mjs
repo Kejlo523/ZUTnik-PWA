@@ -454,9 +454,47 @@ function cleanQueryParams(params = {}) {
   return cleanParams;
 }
 
+function cleanErrorText(value = '') {
+  return String(value)
+    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/gi, "'")
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function getFriendlyUsosErrorMessage(status, value = '') {
+  const rawNormalized = String(value).toLowerCase();
+  const cleaned = cleanErrorText(value);
+  const normalized = cleaned.toLowerCase();
+
+  if (
+    status === 503
+    || normalized.includes('service unavailable')
+    || normalized.includes('temporarily overloading')
+    || normalized.includes('server is temporarily')
+  ) {
+    return 'USOS jest teraz chwilowo niedostępny. Spróbuj ponownie za chwilę.';
+  }
+  if (rawNormalized.includes('doctype html') || rawNormalized.includes('<!doctype') || rawNormalized.includes('<html')) {
+    return 'USOS zwrócił nieczytelną odpowiedź. Spróbuj ponownie za chwilę.';
+  }
+  if (cleaned.length > 220) {
+    return `${cleaned.slice(0, 217).trim()}...`;
+  }
+
+  return cleaned || 'USOS API error';
+}
+
 function sendUsosError(res, error) {
   const status = Number(error?.status) || 500;
-  return res.status(status).json({ error: error?.message || 'USOS API error' });
+  return res.status(status).json({ error: getFriendlyUsosErrorMessage(status, error?.message || 'USOS API error') });
 }
 
 async function fetchUsosJson(endpoint, {
@@ -500,7 +538,7 @@ async function fetchUsosJson(endpoint, {
 
   const body = await response.text();
   if (!response.ok) {
-    const error = new Error(`USOS API error: ${body || response.statusText}`);
+    const error = new Error(getFriendlyUsosErrorMessage(response.status, body || response.statusText));
     error.status = response.status;
     throw error;
   }
@@ -818,7 +856,7 @@ app.get('/api/usos/request-token', async (req, res) => {
 
     const text = await response.text();
     if (!response.ok) {
-      return res.status(response.status).json({ error: `USOS Request Token error: ${text}` });
+      return res.status(response.status).json({ error: getFriendlyUsosErrorMessage(response.status, text) });
     }
 
     const result = Object.fromEntries(new URLSearchParams(text));
@@ -861,7 +899,7 @@ app.post('/api/usos/access-token', async (req, res) => {
 
     const text = await response.text();
     if (!response.ok) {
-      return res.status(response.status).json({ error: `USOS Access Token error: ${text}` });
+      return res.status(response.status).json({ error: getFriendlyUsosErrorMessage(response.status, text) });
     }
 
     const result = Object.fromEntries(new URLSearchParams(text));

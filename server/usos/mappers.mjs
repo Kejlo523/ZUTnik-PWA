@@ -317,8 +317,12 @@ function gradeDedupeKey(grade) {
   ].join('|').toLowerCase();
 }
 
-export function mapGrades({ termId = '', coursesResponse, ectsResponse, gradesResponse, latestGrades = [] }) {
-  const termIds = termId ? [termId] : collectCourseTermIds(coursesResponse, gradesResponse);
+export function mapGrades({ termId = '', termIds: scopedTermIds = null, coursesResponse, ectsResponse, gradesResponse, latestGrades = [] }) {
+  const termIds = termId
+    ? [termId]
+    : (Array.isArray(scopedTermIds) && scopedTermIds.length
+        ? [...new Set(scopedTermIds.filter(Boolean))]
+        : collectCourseTermIds(coursesResponse, gradesResponse));
   const includeEmptyCourses = true;
   const out = [];
   const seen = new Set();

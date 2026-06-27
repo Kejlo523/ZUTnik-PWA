@@ -420,10 +420,6 @@ export function GradesScreen({
                 <div className="metric-card"><div className="metric-label">{t('grades.count')}</div><div className="metric-value">{gradesSummary.count}</div></div>
               </div>
             </div>
-
-            <div className="grades-filters-container grades-account-scope">
-              <div className="usos-scope-note">{t('grades.accountScopeNotice')}</div>
-            </div>
           </div>
 
           <div className="grades-surface">

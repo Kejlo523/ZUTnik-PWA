@@ -161,6 +161,35 @@ test('maps account-level grades with activity labels and missing grade placehold
   assert.equal(grades.find((grade) => grade.type === 'Wykład')?.grade, '');
 });
 
+test('keeps account-level grades scoped to selected terms', () => {
+  const grades = mapGrades({
+    termIds: ['2025L'],
+    coursesResponse: {
+      terms: [{ id: '2024Z' }, { id: '2025L' }],
+      course_editions: {
+        '2024Z': [
+          { course_id: 'OLD-WK', course_name: { pl: 'Stary przedmiot' }, term_id: '2024Z' },
+        ],
+        '2025L': [
+          { course_id: 'NEW-WK', course_name: { pl: 'Aktualny przedmiot' }, term_id: '2025L' },
+        ],
+      },
+    },
+    ectsResponse: {},
+    gradesResponse: {
+      '2024Z': {
+        'OLD-WK': { course_grades: { 1: { value_symbol: '5' } } },
+      },
+      '2025L': {
+        'NEW-WK': { course_grades: { 1: { value_symbol: '' } } },
+      },
+    },
+  });
+
+  assert.deepEqual(grades.map((grade) => grade.subjectName), ['Aktualny przedmiot']);
+  assert.equal(grades[0].grade, '');
+});
+
 test('normalizes finance balance signs', () => {
   const records = mapFinanceRecords([
     {

@@ -673,6 +673,10 @@ function getCourseIdsForTerm(coursesResponse, termId) {
     .filter(Boolean))];
 }
 
+function getCourseIdsForTerms(coursesResponse, termIds) {
+  return [...new Set(termIds.flatMap((termId) => getCourseIdsForTerm(coursesResponse, termId)))];
+}
+
 function getTermIdsForCourses(coursesResponse) {
   const ids = new Set();
   for (const term of asArray(coursesResponse?.terms)) {
@@ -686,6 +690,11 @@ function getTermIdsForCourses(coursesResponse) {
     if (id) ids.add(id);
   }
   return [...ids].sort((left, right) => left.localeCompare(right, 'pl'));
+}
+
+function latestGradeTermId(entry) {
+  const edition = entry?.course_edition && typeof entry.course_edition === 'object' ? entry.course_edition : {};
+  return firstNonEmpty(edition?.term_id, entry?.term_id);
 }
 
 function countGradesForTerm(gradesResponse, termId) {
@@ -1084,6 +1093,7 @@ app.post('/api/usos/grades', async (req, res) => {
   try {
     const { token, secret } = getUsosCredentials(req);
     const termId = firstNonEmpty(req.body?.termId);
+    const activeTermsOnly = termId ? 'false' : 'true';
 
     const coursesResponse = await fetchUsosJson('services/courses/user', {
       token,
@@ -1091,7 +1101,7 @@ app.post('/api/usos/grades', async (req, res) => {
       tokenMode: 'required',
       params: {
         fields: COURSE_WITH_GRADES_FIELDS,
-        active_terms_only: 'false',
+        active_terms_only: activeTermsOnly,
       },
     }).catch(() => fetchUsosJson('services/courses/user', {
       token,
@@ -1099,14 +1109,14 @@ app.post('/api/usos/grades', async (req, res) => {
       tokenMode: 'required',
       params: {
         fields: COURSE_FIELDS,
-        active_terms_only: 'false',
+        active_terms_only: activeTermsOnly,
       },
     }));
     const termIds = termId ? [termId] : getTermIdsForCourses(coursesResponse);
     if (!termIds.length) {
       return res.json({ grades: [] });
     }
-    const courseIds = termId ? getCourseIdsForTerm(coursesResponse, termId) : [];
+    const courseIds = termId ? getCourseIdsForTerm(coursesResponse, termId) : getCourseIdsForTerms(coursesResponse, termIds);
     const [ectsResponse, gradesTermsResponse] = await Promise.all([
       fetchUsosJson('services/courses/user_ects_points', {
         token,
@@ -1125,11 +1135,11 @@ app.post('/api/usos/grades', async (req, res) => {
             days: '4000',
             fields: GRADE_WITH_CONTEXT_FIELDS,
           },
-        }).then(asArray).catch(() => []);
+        }).then((items) => asArray(items).filter((entry) => termIds.includes(latestGradeTermId(entry)))).catch(() => []);
     const gradesResponse = termId && countGradesForTerm(gradesTermsResponse, termId) === 0 && courseIds.length > 0
       ? await fetchCourseEditionGradesByCourse(token, secret, termId, courseIds)
       : gradesTermsResponse;
-    const grades = mapGrades({ termId, coursesResponse, ectsResponse, gradesResponse, latestGrades });
+    const grades = mapGrades({ termId, termIds, coursesResponse, ectsResponse, gradesResponse, latestGrades });
 
     return res.json({
       grades,

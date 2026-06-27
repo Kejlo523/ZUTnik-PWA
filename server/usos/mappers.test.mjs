@@ -121,6 +121,46 @@ test('maps course-user grade fallback when terms2 has no grade rows', () => {
   assert.equal(grades[0].type, 'Ocena końcowa');
 });
 
+test('maps account-level grades with activity labels and missing grade placeholders', () => {
+  const grades = mapGrades({
+    coursesResponse: {
+      terms: [{ id: '2025L' }],
+      course_editions: {
+        '2025L': [
+          { course_id: 'GRAF-CW', course_name: { pl: 'Grafika i wizualizacja' }, term_id: '2025L' },
+          { course_id: 'GRAF-LB', course_name: { pl: 'Grafika i wizualizacja' }, term_id: '2025L' },
+          { course_id: 'GRAF-WK', course_name: { pl: 'Grafika i wizualizacja' }, term_id: '2025L' },
+        ],
+      },
+    },
+    ectsResponse: {
+      '2025L': { 'GRAF-CW': '4', 'GRAF-LB': '4', 'GRAF-WK': '4' },
+    },
+    gradesResponse: {
+      '2025L': {
+        'GRAF-CW': {
+          course_grades: {
+            1: { value_symbol: '3.5', date_acquisition: '2026-06-01 12:00:00' },
+            2: { value_symbol: '' },
+          },
+        },
+        'GRAF-LB': {
+          course_grades: [],
+        },
+        'GRAF-WK': {
+          course_grades: [],
+        },
+      },
+    },
+  });
+
+  assert.equal(grades.length, 3);
+  assert.deepEqual(grades.map((grade) => grade.type).sort((a, b) => a.localeCompare(b, 'pl')), ['Ćwiczenia', 'Laboratorium', 'Wykład']);
+  assert.equal(grades.find((grade) => grade.type === 'Ćwiczenia')?.grade, '3.5');
+  assert.equal(grades.find((grade) => grade.type === 'Laboratorium')?.grade, '');
+  assert.equal(grades.find((grade) => grade.type === 'Wykład')?.grade, '');
+});
+
 test('normalizes finance balance signs', () => {
   const records = mapFinanceRecords([
     {

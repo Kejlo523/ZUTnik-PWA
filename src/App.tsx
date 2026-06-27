@@ -2,7 +2,6 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import './App.css';
 import type {
   CalendarEvent,
-  CourseTest,
   CreditSummary,
   ElsCard,
   FinanceSnapshot,
@@ -10,7 +9,6 @@ import type {
   NewsItem,
   PlanResult,
   ScreenKey,
-  Semester,
   SessionData,
   SessionPeriod,
   StatsSnapshot,
@@ -23,9 +21,7 @@ import type {
 import {
   buildPlanResultFromWindow,
   fetchCombinedGrades,
-  fetchCombinedSemesters,
   fetchCombinedStudies,
-  fetchCourseTests,
   fetchCreditSummary,
   fetchFinance,
   fetchInfo,
@@ -372,16 +368,9 @@ function App() {
   });
 
   // Grades
-  const [semesters, setSemesters] = useState<Semester[]>([]);
-  const [selSemId, setSelSemId] = useState('');
   const [grades, setGrades] = useState<Grade[]>([]);
   const [gradesLoading, setGradesLoad] = useState(false);
-  const [totalEctsAll, setTotalEctsAll] = useState(0);
-  const [courseTests, setCourseTests] = useState<CourseTest[]>([]);
-  const [courseTestsLoading, setCourseTestsLoading] = useState(false);
-  const [courseTestsMissingScopes, setCourseTestsMissingScopes] = useState<string[]>([]);
   const [expandedGradeSubjects, setExpandedGradeSubjects] = useState<Record<string, boolean>>({});
-  const selSemPrev = useRef('');
   const planRequestIdRef = useRef<string>('');
   const planWindowCacheRef = useRef<Record<string, PlanWindowData>>({});
   const planWindowRequestsRef = useRef<Record<string, Promise<PlanWindowData>>>({});
@@ -414,11 +403,6 @@ function App() {
   const hasMultipleUsosProgrammes = studies.length > 1;
   const canOpenStats = useMemo(() => normalizeStatsAlbum(session?.userId) === STATS_OWNER_ALBUM, [session?.userId]);
   const sessionScopes = useMemo(() => session?.usos?.scopes ?? [], [session?.usos?.scopes]);
-  const effectiveCourseTestsMissingScopes = useMemo(() => {
-    const missing = new Set(courseTestsMissingScopes);
-    if (session && !sessionScopes.includes('crstests')) missing.add('crstests');
-    return [...missing];
-  }, [courseTestsMissingScopes, session, sessionScopes]);
   const effectiveSurveysMissingScopes = useMemo(() => {
     const missing = new Set(surveysMissingScopes);
     if (session && !sessionScopes.includes('surveys_filling')) missing.add('surveys_filling');
@@ -1203,123 +1187,27 @@ function App() {
     };
   }, [screen, planSearchOpen, planSearchQ, resetPlanSearch]);
 
-  const loadCourseTestsData = useCallback(async (semesterId: string, forceRefresh = false) => {
-    if (!session || !semesterId) {
-      setCourseTests([]);
-      setCourseTestsMissingScopes([]);
-      return;
-    }
-
-    const cached = cache.loadCourseTestsForce(semesterId);
-    if (cached && !forceRefresh) {
-      setCourseTests(cached.tests ?? []);
-      setCourseTestsMissingScopes(cached.missingScopes ?? []);
-    }
-
-    if (cache.loadCourseTests(semesterId) && !forceRefresh) return;
-
-    setCourseTestsLoading(true);
-    try {
-      const payload = await fetchCourseTests(session, semesterId);
-      cache.saveCourseTests(semesterId, payload);
-      setCourseTests(payload.tests);
-      setCourseTestsMissingScopes(payload.missingScopes);
-    } catch (e) {
-      if (handleSessionError(e)) return;
-      if (!cached) {
-        setCourseTests([]);
-        setCourseTestsMissingScopes([]);
-      }
-    } finally {
-      setCourseTestsLoading(false);
-    }
-  }, [session, handleSessionError]);
-
-  const loadGradesData = useCallback(async (resetSemId = false, forceRefresh = false) => {
-    if (!session || !activeStudyId) {
-      setSemesters([]);
-      setSelSemId('');
+  const loadGradesData = useCallback(async (forceRefresh = false) => {
+    if (!session) {
       setGrades([]);
-      setTotalEctsAll(0);
-      setCourseTests([]);
-      setCourseTestsMissingScopes([]);
       return;
     }
 
     if (!(await ensureSessionStillValid(session))) return;
 
-    const cachedSem = cache.loadSemestersForce(activeStudyId) ?? [];
-    if (cachedSem.length && !forceRefresh) setSemesters(cachedSem);
-
-    const activeSemId = resetSemId ? '' : selSemId;
-    const semId = activeSemId || cachedSem?.[cachedSem.length - 1]?.listaSemestrowId;
-    if (semId && !forceRefresh) {
-      const cachedG = cache.loadGradesForce(semId);
-      if (cachedG) setGrades(cachedG);
+    const gradesCacheKey = `${session.userId || 'usos'}_account_v2`;
+    if (!forceRefresh) {
+      const cached = cache.loadGradesForce(gradesCacheKey);
+      if (cached) setGrades(cached);
+      if (cache.loadGrades(gradesCacheKey)) return;
     }
 
     setGradesLoad(true);
     setGlobalError('');
     try {
-      let sems = cachedSem;
-      if (!cache.loadSemesters(activeStudyId)) {
-        sems = await fetchCombinedSemesters(session, activeStudyId);
-        cache.saveSemesters(activeStudyId, sems);
-        setSemesters(sems);
-      }
-
-      const safeSems = sems ?? [];
-      const curSemId = activeSemId || safeSems[safeSems.length - 1]?.listaSemestrowId;
-      if (!curSemId) {
-        setGrades([]);
-        setSelSemId('');
-        setTotalEctsAll(0);
-        return;
-      }
-
-      setSelSemId(curSemId);
-      if (!cache.loadGrades(curSemId)) {
-        const fresh = await fetchCombinedGrades(session, curSemId);
-        cache.saveGrades(curSemId, fresh);
-        setGrades(fresh);
-      }
-      void loadCourseTestsData(curSemId, forceRefresh);
-
-      const semFingerprint = safeSems.map(s => s.listaSemestrowId).join('|');
-      const totalEctsCacheKey = `zutnik_usos_total_ects_${session.userId}_${activeStudyId}`;
-      try {
-        const cachedRaw = window.localStorage.getItem(totalEctsCacheKey);
-        if (cachedRaw) {
-          const parsed = JSON.parse(cachedRaw) as { semFingerprint: string; value: number };
-          if (parsed.semFingerprint === semFingerprint && Number.isFinite(parsed.value)) {
-            setTotalEctsAll(Math.max(0, Number(parsed.value)));
-          }
-        }
-      } catch {
-        // noop
-      }
-
-      let total = 0;
-      for (const sem of safeSems) {
-        if (!sem.listaSemestrowId) continue;
-        let semGrades = cache.loadGradesForce(sem.listaSemestrowId);
-        if (!semGrades) {
-          try {
-            semGrades = await fetchCombinedGrades(session, sem.listaSemestrowId);
-            cache.saveGrades(sem.listaSemestrowId, semGrades);
-          } catch {
-            semGrades = cache.loadGradesForce(sem.listaSemestrowId) ?? [];
-          }
-        }
-        total += sumUniqueEcts(semGrades ?? []);
-      }
-
-      setTotalEctsAll(total);
-      try {
-        window.localStorage.setItem(totalEctsCacheKey, JSON.stringify({ semFingerprint, value: total }));
-      } catch {
-        // noop
-      }
+      const fresh = await fetchCombinedGrades(session);
+      cache.saveGrades(gradesCacheKey, fresh);
+      setGrades(fresh);
     } catch (e) {
       if (handleSessionError(e)) return;
       if (!grades.length) {
@@ -1328,7 +1216,7 @@ function App() {
     } finally {
       setGradesLoad(false);
     }
-  }, [session, activeStudyId, selSemId, grades.length, ensureSessionStillValid, handleSessionError, loadCourseTestsData, showGlobalError]);
+  }, [session, grades.length, ensureSessionStillValid, handleSessionError, showGlobalError]);
 
   const loadFinanceData = useCallback(async (forceRefresh = false) => {
     if (!session || !activeStudyId) {
@@ -1471,13 +1359,7 @@ function App() {
     if (prevStudyId.current === activeStudyId) return;
 
     prevStudyId.current = activeStudyId;
-    setSelSemId('');
-    selSemPrev.current = '';
-    setSemesters([]);
     setGrades([]);
-    setTotalEctsAll(0);
-    setCourseTests([]);
-    setCourseTestsMissingScopes([]);
     setFinanceSnapshot({ ...EMPTY_FINANCE_SNAPSHOT });
     setDetails(null);
     setHistory([]);
@@ -1500,33 +1382,6 @@ function App() {
     if (screen === 'plan' && session) void loadPlanData();
   }, [planViewMode, planDate, activeStudyId]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ── Refresh grades when semester selected changes ─────────────────────────
-  useEffect(() => {
-    if (screen === 'grades' && session && selSemId && selSemId !== selSemPrev.current) {
-      selSemPrev.current = selSemId;
-      if (!cache.loadGrades(selSemId)) {
-        setGradesLoad(true);
-        (async () => {
-          try {
-            if (!(await ensureSessionStillValid(session))) return;
-            const g = await fetchCombinedGrades(session, selSemId);
-            cache.saveGrades(selSemId, g);
-            setGrades(g);
-            void loadCourseTestsData(selSemId);
-          } catch (e) {
-            handleSessionError(e);
-          } finally {
-            setGradesLoad(false);
-          }
-        })();
-      } else {
-        const cached = cache.loadGradesForce(selSemId);
-        if (cached) setGrades(cached);
-        void loadCourseTestsData(selSemId);
-      }
-    }
-  }, [selSemId, screen, session, ensureSessionStillValid, handleSessionError, loadCourseTestsData]);
-
   // ── Computed values ───────────────────────────────────────────────────────
 
   const groupedGrades = useMemo(() => {
@@ -1545,8 +1400,10 @@ function App() {
           return (a.type || '').localeCompare(b.type || '', 'pl');
         });
 
-        const finalItem = items.find(item => isFinalGradeType(item.type, item.subjectName));
-        const finalGrade = finalItem?.grade?.trim() ? finalItem.grade : '–';
+        const finalItem = items.find(item => isFinalGradeType(item.type, item.subjectName) && item.grade.trim())
+          ?? items.find(item => item.grade.trim())
+          ?? items[0];
+        const finalGrade = finalItem?.grade?.trim() ? finalItem.grade : '';
 
         const ects = items.reduce((max, item) => (item.weight > max ? item.weight : max), 0);
         return {
@@ -1621,7 +1478,8 @@ function App() {
 
     const avg = sumWeights > 0 ? fmtDec(sumWeighted / sumWeights, 2) : '-';
     const ects = Math.round(Math.max(0, sumUniqueEcts(grades)));
-    return { avg, ects: String(ects) };
+    const count = grades.filter((g) => g.grade.trim()).length;
+    return { avg, ects: String(ects), count: String(count) };
   }, [grades]);
 
   const links = useMemo(() => sortUsefulLinks(studies), [studies]);
@@ -2489,23 +2347,12 @@ function App() {
       <GradesScreen
         t={t}
         gradesSummary={gradesSummary}
-        totalEctsAll={totalEctsAll}
-        studies={studies}
-        activeStudyId={activeStudyId}
-        updateActiveStudy={updateActiveStudy}
-        semesters={semesters}
-        selSemId={selSemId}
-        setSelSemId={setSelSemId}
         gradesLoading={gradesLoading}
         grades={grades}
         settings={settings}
         groupedGrades={groupedGrades}
-        courseTests={courseTests}
-        courseTestsLoading={courseTestsLoading}
-        courseTestsMissingScopes={effectiveCourseTestsMissingScopes}
         expandedGradeSubjects={expandedGradeSubjects}
         setExpandedGradeSubjects={setExpandedGradeSubjects}
-        hasProgrammeSplitNotice={hasMultipleUsosProgrammes}
       />
     );
   }
@@ -2744,7 +2591,7 @@ function App() {
     } else if (screen === 'home' && canOfferInstall) {
       actions.push({ key: 'install', icon: 'download', label: t('install.now'), onClick: () => void handleInstallPwa(), active: false });
     } else if (screen === 'grades') {
-      actions.push({ key: 'refresh', icon: 'refresh', label: t('grades.refreshLabel'), onClick: () => void loadGradesData(false, true), active: false });
+      actions.push({ key: 'refresh', icon: 'refresh', label: t('grades.refreshLabel'), onClick: () => void loadGradesData(true), active: false });
     } else if (screen === 'finance') {
       actions.push({ key: 'refresh', icon: 'refresh', label: t('finance.refresh'), onClick: () => void loadFinanceData(true), active: false });
     } else if (screen === 'info') {

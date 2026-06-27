@@ -3301,6 +3301,11 @@ button.outline {
   color: var(--mz-muted);
 }
 
+.grade-missing-note {
+  color: var(--mz-muted);
+  font-weight: 700;
+}
+
 .grade-info {
   flex: 1;
   display: flex;

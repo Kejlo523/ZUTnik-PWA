@@ -317,6 +317,20 @@ function gradeDedupeKey(grade) {
   ].join('|').toLowerCase();
 }
 
+function gradeSubjectKey(grade) {
+  return firstNonEmpty(grade?.subjectName, 'Przedmiot');
+}
+
+function keepSubjectsWithAnyGrade(grades) {
+  const subjectsWithGrade = new Set(
+    grades
+      .filter((grade) => grade?.grade?.trim())
+      .map(gradeSubjectKey),
+  );
+
+  return grades.filter((grade) => subjectsWithGrade.has(gradeSubjectKey(grade)));
+}
+
 export function mapGrades({ termId = '', termIds: scopedTermIds = null, coursesResponse, ectsResponse, gradesResponse, latestGrades = [] }) {
   const termIds = termId
     ? [termId]
@@ -389,8 +403,10 @@ export function mapGrades({ termId = '', termIds: scopedTermIds = null, coursesR
     pushGrade(mapSingleGrade(entry, course, 'Ocena końcowa', ects));
   }
 
+  const visibleGrades = keepSubjectsWithAnyGrade(out);
+
   if (!termId) {
-    return out.sort((left, right) => {
+    return visibleGrades.sort((left, right) => {
       const subjectOrder = left.subjectName.localeCompare(right.subjectName, 'pl');
       if (subjectOrder !== 0) return subjectOrder;
       const leftFinal = gradeTypeLabel(left, left.type) === 'Ocena końcowa' ? 0 : 1;
@@ -400,7 +416,7 @@ export function mapGrades({ termId = '', termIds: scopedTermIds = null, coursesR
     });
   }
 
-  return out;
+  return visibleGrades;
 }
 
 function moneyText(value, currency = 'PLN') {

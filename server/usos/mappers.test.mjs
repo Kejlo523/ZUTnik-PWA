@@ -70,6 +70,7 @@ test('maps grades and keeps missing activity grades visible', () => {
       course_editions: {
         '2024Z': [
           { course_id: 'ALG', course_name: { pl: 'Algebra' }, term_id: '2024Z' },
+          { course_id: 'ALG-CW', course_name: { pl: 'Algebra' }, term_id: '2024Z' },
           { course_id: 'MTH', course_name: { pl: 'Matematyka' }, term_id: '2024Z' },
           { course_id: 'PHY', course_name: { pl: 'Fizyka' }, term_id: '2024Z' },
           { course_id: 'PHY-CW', course_name: { pl: 'Fizyka' }, term_id: '2024Z' },
@@ -77,7 +78,7 @@ test('maps grades and keeps missing activity grades visible', () => {
       },
     },
     ectsResponse: {
-      '2024Z': { ALG: '5', MTH: '4', PHY: '3', 'PHY-CW': '3' },
+      '2024Z': { ALG: '5', 'ALG-CW': '5', MTH: '4', PHY: '3', 'PHY-CW': '3' },
     },
     gradesResponse: {
       '2024Z': {
@@ -86,6 +87,9 @@ test('maps grades and keeps missing activity grades visible', () => {
           course_units_grades: {
             ALG_C: [{ value_symbol: 'zal' }],
           },
+        },
+        'ALG-CW': {
+          course_grades: [],
         },
         PHY: {
           course_grades: [],
@@ -98,12 +102,12 @@ test('maps grades and keeps missing activity grades visible', () => {
   });
 
   assert.equal(grades.length, 3);
-  assert.deepEqual(grades.map((grade) => grade.subjectName), ['Algebra', 'Algebra', 'Fizyka']);
+  assert.deepEqual(grades.map((grade) => grade.subjectName), ['Algebra', 'Algebra', 'Algebra']);
   assert.equal(grades[0].type, 'Ocena końcowa');
   assert.equal(grades[1].type, 'Zaliczenie');
   assert.equal(grades[2].grade, '');
   assert.equal(grades[2].type, 'Ćwiczenia');
-  assert.equal(grades[2].weight, 3);
+  assert.equal(grades[2].weight, 5);
 });
 
 test('maps course-user grade fallback when terms2 has no grade rows', () => {
@@ -195,8 +199,7 @@ test('keeps account-level grades scoped to selected terms', () => {
     },
   });
 
-  assert.deepEqual(grades.map((grade) => grade.subjectName), ['Aktualny przedmiot']);
-  assert.equal(grades[0].grade, '');
+  assert.deepEqual(grades, []);
 });
 
 test('normalizes finance balance signs', () => {

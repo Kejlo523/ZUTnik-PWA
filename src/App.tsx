@@ -1195,7 +1195,7 @@ function App() {
 
     if (!(await ensureSessionStillValid(session))) return;
 
-    const gradesCacheKey = `${session.userId || 'usos'}_active_terms_v2`;
+    const gradesCacheKey = `${session.userId || 'usos'}_active_terms_v3`;
     if (!forceRefresh) {
       const cached = cache.loadGradesForce(gradesCacheKey);
       if (cached) setGrades(cached);
@@ -1384,9 +1384,25 @@ function App() {
 
   // ── Computed values ───────────────────────────────────────────────────────
 
-  const groupedGrades = useMemo(() => {
+  const visibleGrades = useMemo(() => {
     const bySubject = new Map<string, Grade[]>();
     for (const g of grades) {
+      const subject = (g.subjectName || 'Przedmiot').trim();
+      bySubject.set(subject, [...(bySubject.get(subject) ?? []), g]);
+    }
+
+    const subjectsWithGrade = new Set(
+      [...bySubject.entries()]
+        .filter(([, items]) => items.some((item) => item.grade.trim()))
+        .map(([subject]) => subject),
+    );
+
+    return grades.filter((g) => subjectsWithGrade.has((g.subjectName || 'Przedmiot').trim()));
+  }, [grades]);
+
+  const groupedGrades = useMemo(() => {
+    const bySubject = new Map<string, Grade[]>();
+    for (const g of visibleGrades) {
       const subject = (g.subjectName || 'Przedmiot').trim();
       bySubject.set(subject, [...(bySubject.get(subject) ?? []), g]);
     }
@@ -1414,7 +1430,7 @@ function App() {
         };
       })
       .sort((a, b) => a.subject.localeCompare(b.subject, 'pl'));
-  }, [grades]);
+  }, [visibleGrades]);
 
   useEffect(() => {
     setExpandedGradeSubjects(prev => {
@@ -1442,7 +1458,7 @@ function App() {
     let sumWeights = 0;
     let usedFinal = false;
 
-    for (const g of grades) {
+    for (const g of visibleGrades) {
       if (!isFinalGradeType(g.type, g.subjectName)) continue;
       const v = parseGradeNum(g.grade);
       if (v === null) continue;
@@ -1461,7 +1477,7 @@ function App() {
     if (!usedFinal) {
       sumWeighted = 0;
       sumWeights = 0;
-      for (const g of grades) {
+      for (const g of visibleGrades) {
         const v = parseGradeNum(g.grade);
         if (v === null) continue;
 
@@ -1477,10 +1493,10 @@ function App() {
     }
 
     const avg = sumWeights > 0 ? fmtDec(sumWeighted / sumWeights, 2) : '-';
-    const ects = Math.round(Math.max(0, sumUniqueEcts(grades)));
-    const count = grades.filter((g) => g.grade.trim()).length;
+    const ects = Math.round(Math.max(0, sumUniqueEcts(visibleGrades)));
+    const count = visibleGrades.filter((g) => g.grade.trim()).length;
     return { avg, ects: String(ects), count: String(count) };
-  }, [grades]);
+  }, [visibleGrades]);
 
   const links = useMemo(() => sortUsefulLinks(studies), [studies]);
 
@@ -2348,7 +2364,7 @@ function App() {
         t={t}
         gradesSummary={gradesSummary}
         gradesLoading={gradesLoading}
-        grades={grades}
+        grades={visibleGrades}
         settings={settings}
         groupedGrades={groupedGrades}
         expandedGradeSubjects={expandedGradeSubjects}

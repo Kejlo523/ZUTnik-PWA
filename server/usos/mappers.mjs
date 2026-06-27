@@ -323,7 +323,6 @@ export function mapGrades({ termId = '', termIds: scopedTermIds = null, coursesR
     : (Array.isArray(scopedTermIds) && scopedTermIds.length
         ? [...new Set(scopedTermIds.filter(Boolean))]
         : collectCourseTermIds(coursesResponse, gradesResponse));
-  const includeEmptyCourses = true;
   const out = [];
   const seen = new Set();
 
@@ -370,7 +369,7 @@ export function mapGrades({ termId = '', termIds: scopedTermIds = null, coursesR
         }
       }
 
-      if (!hasAnyGrade && includeEmptyCourses) {
+      if (!hasAnyGrade && course.activityType) {
         out.push({
           subjectName: course.name || course.id,
           grade: '',

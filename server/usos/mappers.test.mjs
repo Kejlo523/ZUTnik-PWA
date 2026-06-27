@@ -63,19 +63,21 @@ test('sorts semesters chronologically with newest last', () => {
   assert.equal(semesters.at(-1)?.status, 'Aktywny');
 });
 
-test('maps grades and keeps courses without grades visible', () => {
+test('maps grades and keeps missing activity grades visible', () => {
   const grades = mapGrades({
     termId: '2024Z',
     coursesResponse: {
       course_editions: {
         '2024Z': [
           { course_id: 'ALG', course_name: { pl: 'Algebra' }, term_id: '2024Z' },
+          { course_id: 'MTH', course_name: { pl: 'Matematyka' }, term_id: '2024Z' },
           { course_id: 'PHY', course_name: { pl: 'Fizyka' }, term_id: '2024Z' },
+          { course_id: 'PHY-CW', course_name: { pl: 'Fizyka' }, term_id: '2024Z' },
         ],
       },
     },
     ectsResponse: {
-      '2024Z': { ALG: '5', PHY: '3' },
+      '2024Z': { ALG: '5', MTH: '4', PHY: '3', 'PHY-CW': '3' },
     },
     gradesResponse: {
       '2024Z': {
@@ -84,6 +86,12 @@ test('maps grades and keeps courses without grades visible', () => {
           course_units_grades: {
             ALG_C: [{ value_symbol: 'zal' }],
           },
+        },
+        PHY: {
+          course_grades: [],
+        },
+        'PHY-CW': {
+          course_grades: [],
         },
       },
     },
@@ -94,6 +102,7 @@ test('maps grades and keeps courses without grades visible', () => {
   assert.equal(grades[0].type, 'Ocena końcowa');
   assert.equal(grades[1].type, 'Zaliczenie');
   assert.equal(grades[2].grade, '');
+  assert.equal(grades[2].type, 'Ćwiczenia');
   assert.equal(grades[2].weight, 3);
 });
 

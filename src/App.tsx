@@ -1195,7 +1195,7 @@ function App() {
 
     if (!(await ensureSessionStillValid(session))) return;
 
-    const gradesCacheKey = `${session.userId || 'usos'}_active_terms_v1`;
+    const gradesCacheKey = `${session.userId || 'usos'}_active_terms_v2`;
     if (!forceRefresh) {
       const cached = cache.loadGradesForce(gradesCacheKey);
       if (cached) setGrades(cached);

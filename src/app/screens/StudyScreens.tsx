@@ -405,6 +405,9 @@ export function GradesScreen({
   const gradeTypeText = (grade: Grade) => (
     isFinalGradeType(grade.type, grade.subjectName) ? t('grades.finalGrade') : (grade.type || t('grades.component'))
   );
+  const shouldShowMissingGrade = (grade: Grade) => (
+    !grade.grade.trim() && ['Ćwiczenia', 'Laboratorium', 'Wykład'].includes(grade.type)
+  );
 
   return (
     <section className="screen grades-screen">
@@ -435,6 +438,7 @@ export function GradesScreen({
                   const visibleItems = detailItems.length > 0 ? detailItems : items;
                   const previewItems = visibleItems.slice(0, 3);
                   const previewOverflow = Math.max(0, visibleItems.length - previewItems.length);
+                  const hasFinalGrade = !!finalGrade.trim();
                   return (
                     <div key={subject} className={`grade-group${isOpen ? ' is-open' : ''}`}>
                       <button
@@ -450,13 +454,15 @@ export function GradesScreen({
                           </div>
                         </div>
                         <div className="grade-group-side">
-                          <div className="grade-group-summary">
-                            <div className={`grade-group-pill ${gradeTone(finalGrade)}`}>{gradeText(finalGrade)}</div>
-                            <div className="grade-group-summary-copy">
-                              <span>{t('grades.finalGrade')}</span>
-                              {ects > 0 && <span>{fmtDec(ects, 1)} ECTS</span>}
+                          {(hasFinalGrade || ects > 0) && (
+                            <div className="grade-group-summary">
+                              {hasFinalGrade && <div className={`grade-group-pill ${gradeTone(finalGrade)}`}>{gradeText(finalGrade)}</div>}
+                              <div className="grade-group-summary-copy">
+                                {hasFinalGrade && <span>{t('grades.finalGrade')}</span>}
+                                {ects > 0 && <span>{fmtDec(ects, 1)} ECTS</span>}
+                              </div>
                             </div>
-                          </div>
+                          )}
                           <div className={`grade-group-chevron ${isOpen ? 'open' : ''}`}><Ic n="chevR" /></div>
                         </div>
                       </button>
@@ -484,7 +490,7 @@ export function GradesScreen({
                               <span className={`grade-pill ${gradeTone(g.grade)}`}>{g.grade.trim() || '–'}</span>
                               <div className="grade-info">
                                 <div className="grade-type-chip">{gradeTypeText(g)}</div>
-                                {!g.grade.trim() && <div className="grade-date-teacher grade-missing-note">{t('grades.missingGrade')}</div>}
+                                {shouldShowMissingGrade(g) && <div className="grade-date-teacher grade-missing-note">{t('grades.missingGrade')}</div>}
                                 {g.date && <div className="grade-date-teacher">{g.date}</div>}
                                 {g.teacher && <div className="grade-date-teacher grade-date-teacher-secondary">{g.teacher}</div>}
                               </div>
@@ -505,7 +511,7 @@ export function GradesScreen({
                       </div>
                       <div className="grade-flat-meta">
                         <div className="grade-type-chip">{gradeTypeText(g)}</div>
-                        {!g.grade.trim() && <div className="grade-date-teacher grade-missing-note">{t('grades.missingGrade')}</div>}
+                        {shouldShowMissingGrade(g) && <div className="grade-date-teacher grade-missing-note">{t('grades.missingGrade')}</div>}
                         {(g.date || g.teacher) && (
                           <div className="grade-date-teacher">
                             {g.date || '–'}{g.teacher ? ` · ${g.teacher}` : ''}

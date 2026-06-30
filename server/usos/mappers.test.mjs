@@ -63,19 +63,22 @@ test('sorts semesters chronologically with newest last', () => {
   assert.equal(semesters.at(-1)?.status, 'Aktywny');
 });
 
-test('maps grades and keeps courses without grades visible', () => {
+test('maps grades and keeps missing activity grades visible', () => {
   const grades = mapGrades({
     termId: '2024Z',
     coursesResponse: {
       course_editions: {
         '2024Z': [
           { course_id: 'ALG', course_name: { pl: 'Algebra' }, term_id: '2024Z' },
+          { course_id: 'ALG-CW', course_name: { pl: 'Algebra' }, term_id: '2024Z' },
+          { course_id: 'MTH', course_name: { pl: 'Matematyka' }, term_id: '2024Z' },
           { course_id: 'PHY', course_name: { pl: 'Fizyka' }, term_id: '2024Z' },
+          { course_id: 'PHY-CW', course_name: { pl: 'Fizyka' }, term_id: '2024Z' },
         ],
       },
     },
     ectsResponse: {
-      '2024Z': { ALG: '5', PHY: '3' },
+      '2024Z': { ALG: '5', 'ALG-CW': '5', MTH: '4', PHY: '3', 'PHY-CW': '3' },
     },
     gradesResponse: {
       '2024Z': {
@@ -85,16 +88,26 @@ test('maps grades and keeps courses without grades visible', () => {
             ALG_C: [{ value_symbol: 'zal' }],
           },
         },
+        'ALG-CW': {
+          course_grades: [],
+        },
+        PHY: {
+          course_grades: [],
+        },
+        'PHY-CW': {
+          course_grades: [],
+        },
       },
     },
   });
 
   assert.equal(grades.length, 3);
-  assert.deepEqual(grades.map((grade) => grade.subjectName), ['Algebra', 'Algebra', 'Fizyka']);
+  assert.deepEqual(grades.map((grade) => grade.subjectName), ['Algebra', 'Algebra', 'Algebra']);
   assert.equal(grades[0].type, 'Ocena końcowa');
   assert.equal(grades[1].type, 'Zaliczenie');
   assert.equal(grades[2].grade, '');
-  assert.equal(grades[2].weight, 3);
+  assert.equal(grades[2].type, 'Ćwiczenia');
+  assert.equal(grades[2].weight, 5);
 });
 
 test('maps course-user grade fallback when terms2 has no grade rows', () => {
@@ -119,6 +132,74 @@ test('maps course-user grade fallback when terms2 has no grade rows', () => {
   assert.equal(grades[0].subjectName, 'Algebra');
   assert.equal(grades[0].grade, '5.0');
   assert.equal(grades[0].type, 'Ocena końcowa');
+});
+
+test('maps account-level grades with activity labels and missing grade placeholders', () => {
+  const grades = mapGrades({
+    coursesResponse: {
+      terms: [{ id: '2025L' }],
+      course_editions: {
+        '2025L': [
+          { course_id: 'GRAF-CW', course_name: { pl: 'Grafika i wizualizacja' }, term_id: '2025L' },
+          { course_id: 'GRAF-LB', course_name: { pl: 'Grafika i wizualizacja' }, term_id: '2025L' },
+          { course_id: 'GRAF-WK', course_name: { pl: 'Grafika i wizualizacja' }, term_id: '2025L' },
+        ],
+      },
+    },
+    ectsResponse: {
+      '2025L': { 'GRAF-CW': '4', 'GRAF-LB': '4', 'GRAF-WK': '4' },
+    },
+    gradesResponse: {
+      '2025L': {
+        'GRAF-CW': {
+          course_grades: {
+            1: { value_symbol: '3.5', date_acquisition: '2026-06-01 12:00:00' },
+            2: { value_symbol: '' },
+          },
+        },
+        'GRAF-LB': {
+          course_grades: [],
+        },
+        'GRAF-WK': {
+          course_grades: [],
+        },
+      },
+    },
+  });
+
+  assert.equal(grades.length, 3);
+  assert.deepEqual(grades.map((grade) => grade.type).sort((a, b) => a.localeCompare(b, 'pl')), ['Ćwiczenia', 'Laboratorium', 'Wykład']);
+  assert.equal(grades.find((grade) => grade.type === 'Ćwiczenia')?.grade, '3.5');
+  assert.equal(grades.find((grade) => grade.type === 'Laboratorium')?.grade, '');
+  assert.equal(grades.find((grade) => grade.type === 'Wykład')?.grade, '');
+});
+
+test('keeps account-level grades scoped to selected terms', () => {
+  const grades = mapGrades({
+    termIds: ['2025L'],
+    coursesResponse: {
+      terms: [{ id: '2024Z' }, { id: '2025L' }],
+      course_editions: {
+        '2024Z': [
+          { course_id: 'OLD-WK', course_name: { pl: 'Stary przedmiot' }, term_id: '2024Z' },
+        ],
+        '2025L': [
+          { course_id: 'NEW-WK', course_name: { pl: 'Aktualny przedmiot' }, term_id: '2025L' },
+        ],
+      },
+    },
+    ectsResponse: {},
+    gradesResponse: {
+      '2024Z': {
+        'OLD-WK': { course_grades: { 1: { value_symbol: '5' } } },
+      },
+      '2025L': {
+        'NEW-WK': { course_grades: { 1: { value_symbol: '' } } },
+      },
+    },
+  });
+
+  assert.deepEqual(grades, []);
 });
 
 test('normalizes finance balance signs', () => {

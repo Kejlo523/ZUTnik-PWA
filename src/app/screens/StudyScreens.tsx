@@ -2,12 +2,10 @@ import { useMemo, useState, type Dispatch, type SetStateAction } from 'react';
 
 import type {
   CalendarEvent,
-  CourseTest,
   CreditSummary,
   ElsCard,
   FinanceRecord,
   Grade,
-  Semester,
   SessionData,
   Study,
   StudyDetails,
@@ -35,14 +33,7 @@ function GradesLoadingSkeleton() {
         </div>
 
         <div className="grades-filters-container skeleton-panel">
-          <div className="grades-filters">
-            {[0, 1].map((idx) => (
-              <div key={idx} className="field-label skeleton-field">
-                <Skeleton className="skeleton-line skeleton-line-xs" style={{ width: '34%' }} />
-                <Skeleton className="skeleton-block skeleton-input" />
-              </div>
-            ))}
-          </div>
+          <Skeleton className="skeleton-line skeleton-line-xs" style={{ width: '72%' }} />
         </div>
       </div>
 
@@ -340,17 +331,6 @@ function formatNullableNumber(value: number | null | undefined, fractionDigits =
   }).format(value);
 }
 
-function formatCourseTestScore(score: CourseTest['scores'][number]): string {
-  if (score.type === 'points') {
-    const points = formatNullableNumber(score.points);
-    if (typeof score.maxPoints === 'number' && Number.isFinite(score.maxPoints)) {
-      return `${points}/${formatNullableNumber(score.maxPoints)} pkt`;
-    }
-    return `${points} pkt`;
-  }
-  return score.value || '–';
-}
-
 function hasMissingScope(scopes: string[], scope: string): boolean {
   return scopes.includes(scope);
 }
@@ -399,51 +379,35 @@ function InfoMainLoadingSkeleton() {
 
 interface GradesScreenProps {
   t: TranslateFn;
-  gradesSummary: { avg: string; ects: string };
-  totalEctsAll: number;
-  studies: Study[];
-  activeStudyId: string | null;
-  updateActiveStudy: (studyId: string | null) => void;
-  semesters: Semester[];
-  selSemId: string;
-  setSelSemId: Dispatch<SetStateAction<string>>;
+  gradesSummary: { avg: string; ects: string; count: string };
   gradesLoading: boolean;
   grades: Grade[];
   settings: AppSettings;
   groupedGrades: GroupedGradeView[];
-  courseTests: CourseTest[];
-  courseTestsLoading: boolean;
-  courseTestsMissingScopes: string[];
   expandedGradeSubjects: Record<string, boolean>;
   setExpandedGradeSubjects: Dispatch<SetStateAction<Record<string, boolean>>>;
-  hasProgrammeSplitNotice?: boolean;
 }
 
 export function GradesScreen({
   t,
   gradesSummary,
-  totalEctsAll,
-  studies,
-  activeStudyId,
-  updateActiveStudy,
-  semesters,
-  selSemId,
-  setSelSemId,
   gradesLoading,
   grades,
   settings,
   groupedGrades,
-  courseTests,
-  courseTestsLoading,
-  courseTestsMissingScopes,
   expandedGradeSubjects,
   setExpandedGradeSubjects,
-  hasProgrammeSplitNotice = false,
 }: GradesScreenProps) {
   const showGradesSkeleton = gradesLoading && grades.length === 0;
-  const showCourseTestsEmpty = !courseTestsLoading
-    && courseTests.length === 0
-    && !hasMissingScope(courseTestsMissingScopes, 'crstests');
+  const gradeText = (grade: string, fallbackKey: 'grades.missingGrade' | 'grades.missingGradeShort' = 'grades.missingGradeShort') => (
+    grade.trim() || t(fallbackKey)
+  );
+  const gradeTypeText = (grade: Grade) => (
+    isFinalGradeType(grade.type, grade.subjectName) ? t('grades.finalGrade') : (grade.type || t('grades.component'))
+  );
+  const shouldShowMissingGrade = (grade: Grade) => (
+    !grade.grade.trim() && ['Ćwiczenia', 'Laboratorium', 'Wykład'].includes(grade.type)
+  );
 
   return (
     <section className="screen grades-screen">
@@ -455,37 +419,9 @@ export function GradesScreen({
             <div className="grades-hero">
               <div className="metrics-row">
                 <div className="metric-card"><div className="metric-label">{t('grades.avg')}</div><div className="metric-value">{gradesSummary.avg}</div></div>
-                <div className="metric-card"><div className="metric-label">{t('grades.ectsSem')}</div><div className="metric-value">{gradesSummary.ects}</div></div>
-                <div className="metric-card"><div className="metric-label">{t('grades.ectsTotal')}</div><div className="metric-value">{Math.round(Math.max(0, totalEctsAll))}</div></div>
+                <div className="metric-card"><div className="metric-label">{t('grades.ects')}</div><div className="metric-value">{gradesSummary.ects}</div></div>
+                <div className="metric-card"><div className="metric-label">{t('grades.count')}</div><div className="metric-value">{gradesSummary.count}</div></div>
               </div>
-            </div>
-
-            <div className="grades-filters-container">
-              <div className="grades-filters">
-                {studies.length > 0 && (
-                  <label className="field-label">
-                    {t('grades.studyField')}
-                    <select value={activeStudyId ?? ''} onChange={(e) => updateActiveStudy(e.target.value || null)}>
-                      {studies.map((s) => <option key={s.przynaleznoscId} value={s.przynaleznoscId}>{s.label}</option>)}
-                    </select>
-                  </label>
-                )}
-                {semesters.length > 0 && (
-                  <label className="field-label">
-                    {t('grades.semLabel')}
-                    <select value={selSemId} onChange={(e) => setSelSemId(e.target.value)}>
-                      {semesters.map((s) => (
-                        <option key={s.listaSemestrowId} value={s.listaSemestrowId}>
-                          {t('grades.semOption')} {s.nrSemestru} ({t(`period.${s.pora.toLowerCase()}`) || s.pora}) {s.rokAkademicki}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                )}
-              </div>
-              {hasProgrammeSplitNotice && (
-                <div className="usos-scope-note">{t('usos.programmeSplitNotice')}</div>
-              )}
             </div>
           </div>
 
@@ -502,6 +438,7 @@ export function GradesScreen({
                   const visibleItems = detailItems.length > 0 ? detailItems : items;
                   const previewItems = visibleItems.slice(0, 3);
                   const previewOverflow = Math.max(0, visibleItems.length - previewItems.length);
+                  const hasFinalGrade = !!finalGrade.trim();
                   return (
                     <div key={subject} className={`grade-group${isOpen ? ' is-open' : ''}`}>
                       <button
@@ -517,13 +454,15 @@ export function GradesScreen({
                           </div>
                         </div>
                         <div className="grade-group-side">
-                          <div className="grade-group-summary">
-                            <div className={`grade-group-pill ${gradeTone(finalGrade)}`}>{finalGrade || '–'}</div>
-                            <div className="grade-group-summary-copy">
-                              <span>{t('grades.finalGrade')}</span>
-                              {ects > 0 && <span>{fmtDec(ects, 1)} ECTS</span>}
+                          {(hasFinalGrade || ects > 0) && (
+                            <div className="grade-group-summary">
+                              {hasFinalGrade && <div className={`grade-group-pill ${gradeTone(finalGrade)}`}>{gradeText(finalGrade)}</div>}
+                              <div className="grade-group-summary-copy">
+                                {hasFinalGrade && <span>{t('grades.finalGrade')}</span>}
+                                {ects > 0 && <span>{fmtDec(ects, 1)} ECTS</span>}
+                              </div>
                             </div>
-                          </div>
+                          )}
                           <div className={`grade-group-chevron ${isOpen ? 'open' : ''}`}><Ic n="chevR" /></div>
                         </div>
                       </button>
@@ -535,7 +474,7 @@ export function GradesScreen({
                               key={`${subject}-preview-${i}`}
                               className={`grade-preview-pill ${gradeTone(g.grade)}`}
                             >
-                              {g.grade || '–'}
+                              {g.grade.trim() || '–'}
                             </span>
                           ))}
                           {previewOverflow > 0 && (
@@ -548,9 +487,10 @@ export function GradesScreen({
                         <div className="grade-group-items">
                           {visibleItems.map((g, i) => (
                             <div key={`${subject}-${i}`} className="grade-row">
-                              <span className={`grade-pill ${gradeTone(g.grade)}`}>{g.grade || '–'}</span>
+                              <span className={`grade-pill ${gradeTone(g.grade)}`}>{g.grade.trim() || '–'}</span>
                               <div className="grade-info">
-                                <div className="grade-type-chip">{isFinalGradeType(g.type) ? t('grades.finalGrade') : (g.type || t('grades.component'))}</div>
+                                <div className="grade-type-chip">{gradeTypeText(g)}</div>
+                                {shouldShowMissingGrade(g) && <div className="grade-date-teacher grade-missing-note">{t('grades.missingGrade')}</div>}
                                 {g.date && <div className="grade-date-teacher">{g.date}</div>}
                                 {g.teacher && <div className="grade-date-teacher grade-date-teacher-secondary">{g.teacher}</div>}
                               </div>
@@ -567,79 +507,20 @@ export function GradesScreen({
                     <div key={`flat-${i}-${g.subjectName}`} className="grade-row grade-row-flat">
                       <div className="grade-flat-top">
                         <div className="grade-flat-subject">{g.subjectName || t('grades.subject')}</div>
-                        <span className={`grade-pill ${gradeTone(g.grade)}`}>{g.grade || '–'}</span>
+                        <span className={`grade-pill ${gradeTone(g.grade)}`}>{g.grade.trim() || '–'}</span>
                       </div>
                       <div className="grade-flat-meta">
-                        <div className="grade-type-chip">{isFinalGradeType(g.type) ? t('grades.finalGrade') : (g.type || t('grades.component'))}</div>
-                        <div className="grade-date-teacher">
-                          {g.date || '–'}{g.teacher ? ` · ${g.teacher}` : ''}
-                        </div>
+                        <div className="grade-type-chip">{gradeTypeText(g)}</div>
+                        {shouldShowMissingGrade(g) && <div className="grade-date-teacher grade-missing-note">{t('grades.missingGrade')}</div>}
+                        {(g.date || g.teacher) && (
+                          <div className="grade-date-teacher">
+                            {g.date || '–'}{g.teacher ? ` · ${g.teacher}` : ''}
+                          </div>
+                        )}
                         {g.weight > 0 && <div className="grade-ects-chip">{fmtDec(g.weight, 1)} ECTS</div>}
                       </div>
                     </div>
                   ))}
-                </div>
-              )}
-              {courseTestsLoading && courseTests.length === 0 && (
-                <div className="course-tests-panel course-tests-panel-loading">
-                  <div className="course-tests-head">
-                    <Skeleton className="skeleton-line skeleton-line-sm" style={{ width: '160px' }} />
-                    <Skeleton className="skeleton-pill" style={{ width: '72px' }} />
-                  </div>
-                  <Skeleton className="skeleton-line skeleton-line-xs" style={{ width: '72%' }} />
-                  <Skeleton className="skeleton-line skeleton-line-xs" style={{ width: '54%' }} />
-                </div>
-              )}
-              {hasMissingScope(courseTestsMissingScopes, 'crstests') && (
-                <div className="course-tests-panel course-tests-note">
-                  <div className="course-tests-title">{t('grades.courseTestsTitle')}</div>
-                  <p>{t('grades.courseTestsNeedsLogin')}</p>
-                </div>
-              )}
-              {showCourseTestsEmpty && (
-                <div className="course-tests-panel course-tests-note">
-                  <div className="course-tests-title">{t('grades.courseTestsTitle')}</div>
-                  <p>{t('grades.courseTestsEmpty')}</p>
-                </div>
-              )}
-              {courseTests.length > 0 && (
-                <div className="course-tests-panel">
-                  <div className="course-tests-head">
-                    <div>
-                      <div className="course-tests-title">{t('grades.courseTestsTitle')}</div>
-                      <div className="course-tests-subtitle">{t('grades.courseTestsSubtitle')}</div>
-                    </div>
-                    <span className="course-tests-count">{courseTests.length}</span>
-                  </div>
-                  <div className="course-tests-list">
-                    {courseTests.map((test) => (
-                      <article key={`${test.rootId}-${test.courseId}`} className="course-test-card">
-                        <div className="course-test-card-head">
-                          <div>
-                            <div className="course-test-course">{test.courseName || t('grades.subject')}</div>
-                            <div className="course-test-name">{test.testName}</div>
-                          </div>
-                        </div>
-                        <div className="course-test-scores">
-                          {test.scores.map((score) => (
-                            <div key={`${test.rootId}-${score.id}`} className="course-test-score-row">
-                              <div className="course-test-score-copy">
-                                <div className="course-test-score-name">{score.name}</div>
-                                {(score.date || score.comment) && (
-                                  <div className="course-test-score-meta">
-                                    {[score.date, score.comment].filter(Boolean).join(' · ')}
-                                  </div>
-                                )}
-                              </div>
-                              <span className={`course-test-score-pill ${score.type}`}>
-                                {formatCourseTestScore(score)}
-                              </span>
-                            </div>
-                          ))}
-                        </div>
-                      </article>
-                    ))}
-                  </div>
                 </div>
               )}
             </div>

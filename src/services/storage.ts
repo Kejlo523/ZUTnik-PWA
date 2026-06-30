@@ -210,10 +210,10 @@ export const cache = {
   loadSemesters: (studyId: string): Semester[] | null => loadC(ck('sem', studyId), TTL_MS.semesters),
   loadSemestersForce: (studyId: string): Semester[] | null => loadCForce(ck('sem', studyId)),
 
-  // Grades per semester
-  saveGrades: (semId: string, data: Grade[]) => saveC(ck('grades', semId), data),
-  loadGrades: (semId: string): Grade[] | null => loadC(ck('grades', semId), TTL_MS.grades),
-  loadGradesForce: (semId: string): Grade[] | null => loadCForce(ck('grades', semId)),
+  // Grades by account scope
+  saveGrades: (scopeKey: string, data: Grade[]) => saveC(ck('grades', scopeKey), data),
+  loadGrades: (scopeKey: string): Grade[] | null => loadC(ck('grades', scopeKey), TTL_MS.grades),
+  loadGradesForce: (scopeKey: string): Grade[] | null => loadCForce(ck('grades', scopeKey)),
 
   // Course tests per semester
   saveCourseTests: (semId: string, data: { tests: CourseTest[]; missingScopes?: string[] }) => saveC(ck('course_tests', semId), data),

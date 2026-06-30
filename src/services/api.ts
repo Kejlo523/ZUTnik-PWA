@@ -438,14 +438,14 @@ export async function fetchCombinedSemesters(session: SessionData, studyId: stri
   return fetchSemesters(session, studyId);
 }
 
-export async function fetchGrades(session: SessionData, semesterId: string): Promise<Grade[]> {
+export async function fetchGrades(session: SessionData): Promise<Grade[]> {
   if (!session.usos) return [];
-  const body = await postUsosEndpoint<{ grades?: Grade[] }>(session.usos, '/usos/grades', { termId: semesterId });
+  const body = await postUsosEndpoint<{ grades?: Grade[] }>(session.usos, '/usos/grades');
   return ensureArray<Grade>(body.grades);
 }
 
-export async function fetchCombinedGrades(session: SessionData, semesterId: string): Promise<Grade[]> {
-  return fetchGrades(session, semesterId);
+export async function fetchCombinedGrades(session: SessionData): Promise<Grade[]> {
+  return fetchGrades(session);
 }
 
 export async function fetchCourseTests(

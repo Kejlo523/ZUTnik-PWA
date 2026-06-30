@@ -575,9 +575,10 @@ const PROGRAMME_FIELDS = [
 ].join('|');
 const PROGRAMME_FALLBACK_FIELDS = 'id|programme[id|name|description|mode_of_studies|level_of_studies|level]|status|admission_date|is_primary|stages[id|name]';
 const PROGRAMME_MIN_FIELDS = 'id|programme|status|admission_date|is_primary|stages';
-const COURSE_FIELDS = 'course_editions[course_id|course_name|term_id]|terms';
-const COURSE_WITH_GRADES_FIELDS = 'course_editions[course_id|course_name|term_id|grades[value_symbol|passes|value_description|exam_id|exam_session_number|date_modified|date_acquisition]]|terms';
 const GRADE_FIELDS = 'value_symbol|passes|value_description|exam_id|exam_session_number|date_modified|date_acquisition|counts_into_average|grade_type_id';
+const COURSE_FIELDS = 'course_editions[course_id|course_name|term_id]|terms';
+const COURSE_WITH_GRADES_FIELDS = `course_editions[course_id|course_name|term_id|grades[${GRADE_FIELDS}]]|terms`;
+const GRADE_WITH_CONTEXT_FIELDS = `${GRADE_FIELDS}|course_edition[course_id|course_name|term_id|course[id|name]]`;
 const PAYMENT_FIELDS = 'id|saldo_amount|description|state|account_number|payment_deadline|total_amount|currency|debt_type|type';
 const CALENDAR_FIELDS = 'id|name|start_date|end_date|type|is_day_off';
 const NEWS_FIELDS = 'items[article[id|publication_date|title|headline_html|content_html|image_urls[720x405|360x203|original]]]|next_page|total';
@@ -585,6 +586,45 @@ const SURVEY_FIELDS = 'id|survey_type|name|headline_html|start_date|end_date|can
 const CRSTEST_PARTICIPANT_FIELDS = 'course_edition[course_id|course_name|term_id|course[id|name]]|root[node_id|name|type]';
 const CRSTEST_NODE_FIELDS = 'node_id|root_id|parent_id|order|name|visible_for_students|type|points_min|points_max|points_precision|grade_type|subnodes';
 const CRSTEST_NODE_FALLBACK_FIELDS = 'node_id|root_id|parent_id|order|name|visible_for_students|type|subnodes';
+
+function hasGradeValue(entry) {
+  const rawValue = firstNonEmpty(
+    entry?.value_symbol,
+    entry?.value,
+    entry?.value_description?.pl,
+    entry?.value_description?.en,
+    entry?.value_description,
+    entry?.symbol,
+    entry?.grade?.value_symbol,
+    entry?.grade?.value,
+    entry?.grade?.value_description?.pl,
+    entry?.grade?.value_description?.en,
+    entry?.grade?.value_description,
+    entry?.grade?.symbol,
+  );
+  return Boolean(rawValue.trim());
+}
+
+function isGradeEntryLike(entry) {
+  if (!entry || typeof entry !== 'object') return false;
+  return hasGradeValue(entry)
+    || 'passes' in entry
+    || 'exam_id' in entry
+    || 'exam_session_number' in entry
+    || 'date_acquisition' in entry
+    || 'date_modified' in entry
+    || 'grade_type_id' in entry
+    || ('grade' in entry && typeof entry.grade === 'object');
+}
+
+function flattenGradeEntries(value) {
+  if (Array.isArray(value)) {
+    return value.flatMap((entry) => flattenGradeEntries(entry));
+  }
+  if (!value || typeof value !== 'object') return [];
+  if (isGradeEntryLike(value)) return [value];
+  return Object.values(value).flatMap((entry) => flattenGradeEntries(entry));
+}
 
 async function fetchStudentProgrammesRaw(token, secret) {
   const baseParams = {
@@ -633,22 +673,63 @@ function getCourseIdsForTerm(coursesResponse, termId) {
     .filter(Boolean))];
 }
 
+function getCourseIdsForTerms(coursesResponse, termIds) {
+  return [...new Set(termIds.flatMap((termId) => getCourseIdsForTerm(coursesResponse, termId)))];
+}
+
+function getTermIdsForCourses(coursesResponse) {
+  const ids = new Set();
+  for (const term of asArray(coursesResponse?.terms)) {
+    const id = firstNonEmpty(term?.id);
+    if (id) ids.add(id);
+  }
+  const editions = coursesResponse?.course_editions && typeof coursesResponse.course_editions === 'object'
+    ? coursesResponse.course_editions
+    : {};
+  for (const id of Object.keys(editions)) {
+    if (id) ids.add(id);
+  }
+  return [...ids].sort((left, right) => left.localeCompare(right, 'pl'));
+}
+
+function latestGradeTermId(entry) {
+  const edition = entry?.course_edition && typeof entry.course_edition === 'object' ? entry.course_edition : {};
+  return firstNonEmpty(edition?.term_id, entry?.term_id);
+}
+
 function countGradesForTerm(gradesResponse, termId) {
   const termGrades = gradesResponse?.[termId] && typeof gradesResponse[termId] === 'object' ? gradesResponse[termId] : {};
   let count = 0;
 
   for (const courseGradeData of Object.values(termGrades)) {
     if (!courseGradeData || typeof courseGradeData !== 'object') continue;
-    count += asArray(courseGradeData.course_grades).filter(Boolean).length;
+    count += flattenGradeEntries(courseGradeData.course_grades).filter(hasGradeValue).length;
     const unitGrades = courseGradeData.course_units_grades && typeof courseGradeData.course_units_grades === 'object'
       ? courseGradeData.course_units_grades
       : {};
     for (const entries of Object.values(unitGrades)) {
-      count += asArray(entries).filter(Boolean).length;
+      count += flattenGradeEntries(entries).filter(hasGradeValue).length;
     }
   }
 
   return count;
+}
+
+function countGradesForTerms(gradesResponse, termIds) {
+  return termIds.reduce((total, termId) => total + countGradesForTerm(gradesResponse, termId), 0);
+}
+
+async function fetchGradesTerms2(token, secret, termIds, courseIds) {
+  return fetchUsosJson('services/grades/terms2', {
+    token,
+    secret,
+    tokenMode: 'required',
+    params: {
+      term_ids: termIds.join('|'),
+      ...(courseIds.length ? { course_ids: courseIds.join('|') } : {}),
+      fields: GRADE_FIELDS,
+    },
+  });
 }
 
 async function fetchCourseEditionGradesByCourse(token, secret, termId, courseIds) {
@@ -1012,9 +1093,7 @@ app.post('/api/usos/grades', async (req, res) => {
   try {
     const { token, secret } = getUsosCredentials(req);
     const termId = firstNonEmpty(req.body?.termId);
-    if (!termId) {
-      return res.status(400).json({ error: 'Missing termId' });
-    }
+    const activeTermsOnly = termId ? 'false' : 'true';
 
     const coursesResponse = await fetchUsosJson('services/courses/user', {
       token,
@@ -1022,41 +1101,48 @@ app.post('/api/usos/grades', async (req, res) => {
       tokenMode: 'required',
       params: {
         fields: COURSE_WITH_GRADES_FIELDS,
-        active_terms_only: 'false',
+        active_terms_only: activeTermsOnly,
       },
     }).catch(() => fetchUsosJson('services/courses/user', {
-        token,
-        secret,
-        tokenMode: 'required',
-        params: {
-          fields: COURSE_FIELDS,
-          active_terms_only: 'false',
-        },
-      }));
-    const courseIds = getCourseIdsForTerm(coursesResponse, termId);
+      token,
+      secret,
+      tokenMode: 'required',
+      params: {
+        fields: COURSE_FIELDS,
+        active_terms_only: activeTermsOnly,
+      },
+    }));
+    const termIds = termId ? [termId] : getTermIdsForCourses(coursesResponse);
+    if (!termIds.length) {
+      return res.json({ grades: [] });
+    }
+    const courseIds = termId ? getCourseIdsForTerm(coursesResponse, termId) : getCourseIdsForTerms(coursesResponse, termIds);
     const [ectsResponse, gradesTermsResponse] = await Promise.all([
       fetchUsosJson('services/courses/user_ects_points', {
         token,
         secret,
         tokenMode: 'required',
       }).catch(() => ({})),
-      fetchUsosJson('services/grades/terms2', {
-        token,
-        secret,
-        tokenMode: 'required',
-        params: {
-          term_ids: termId,
-          ...(courseIds.length ? { course_ids: courseIds.join('|') } : {}),
-          fields: GRADE_FIELDS,
-        },
-      }),
+      fetchGradesTerms2(token, secret, termIds, courseIds),
     ]);
-    const gradesResponse = countGradesForTerm(gradesTermsResponse, termId) > 0 || courseIds.length === 0
-      ? gradesTermsResponse
-      : await fetchCourseEditionGradesByCourse(token, secret, termId, courseIds);
+    const latestGrades = termId || countGradesForTerms(gradesTermsResponse, termIds) > 0
+      ? []
+      : await fetchUsosJson('services/grades/latest', {
+          token,
+          secret,
+          tokenMode: 'required',
+          params: {
+            days: '4000',
+            fields: GRADE_WITH_CONTEXT_FIELDS,
+          },
+        }).then((items) => asArray(items).filter((entry) => termIds.includes(latestGradeTermId(entry)))).catch(() => []);
+    const gradesResponse = termId && countGradesForTerm(gradesTermsResponse, termId) === 0 && courseIds.length > 0
+      ? await fetchCourseEditionGradesByCourse(token, secret, termId, courseIds)
+      : gradesTermsResponse;
+    const grades = mapGrades({ termId, termIds, coursesResponse, ectsResponse, gradesResponse, latestGrades });
 
     return res.json({
-      grades: mapGrades({ termId, coursesResponse, ectsResponse, gradesResponse }),
+      grades,
     });
   } catch (error) {
     return sendUsosError(res, error);

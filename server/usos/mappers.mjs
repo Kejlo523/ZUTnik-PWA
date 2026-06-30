@@ -188,6 +188,17 @@ function courseName(course) {
   return localizedField(course, 'name') || localizedField(course, 'course_name') || firstNonEmpty(course?.id, course?.course_id);
 }
 
+function courseActivityLabel(courseId) {
+  const match = firstNonEmpty(courseId).match(/-([A-Z]{2})$/i);
+  const suffix = match?.[1]?.toUpperCase();
+  switch (suffix) {
+    case 'CW': return 'Ćwiczenia';
+    case 'LB': return 'Laboratorium';
+    case 'WK': return 'Wykład';
+    default: return '';
+  }
+}
+
 function buildCourseMapForTerm(coursesResponse, termId) {
   const editions = coursesResponse?.course_editions?.[termId] ?? [];
   const map = new Map();
@@ -198,6 +209,7 @@ function buildCourseMapForTerm(coursesResponse, termId) {
     map.set(id, {
       id,
       name: courseName(course),
+      activityType: courseActivityLabel(id),
       ects: parseFlexibleNumber(edition?.ects_credits_simplified ?? course?.ects_credits_simplified),
       grades: asArray(edition?.grades).filter(Boolean),
     });
@@ -205,8 +217,70 @@ function buildCourseMapForTerm(coursesResponse, termId) {
   return map;
 }
 
+function collectCourseTermIds(coursesResponse, gradesResponse) {
+  const ids = new Set();
+  for (const term of asArray(coursesResponse?.terms)) {
+    const id = firstNonEmpty(term?.id);
+    if (id) ids.add(id);
+  }
+  const editions = coursesResponse?.course_editions && typeof coursesResponse.course_editions === 'object'
+    ? coursesResponse.course_editions
+    : {};
+  for (const id of Object.keys(editions)) {
+    if (id) ids.add(id);
+  }
+  if (gradesResponse && typeof gradesResponse === 'object') {
+    for (const id of Object.keys(gradesResponse)) {
+      if (id) ids.add(id);
+    }
+  }
+
+  return [...ids].sort((left, right) => left.localeCompare(right, 'pl'));
+}
+
 function gradeValue(entry) {
-  return firstNonEmpty(entry?.value_symbol, localizedField(entry, 'value_description'));
+  return firstNonEmpty(
+    entry?.value_symbol,
+    localizedField(entry, 'value_description'),
+    entry?.value_description,
+    entry?.value,
+    entry?.symbol,
+    entry?.grade?.value_symbol,
+    localizedField(entry?.grade, 'value_description'),
+    entry?.grade?.value_description,
+    entry?.grade?.value,
+    entry?.grade?.symbol,
+  );
+}
+
+function gradeTypeLabel(entry, fallback) {
+  const raw = firstNonEmpty(localizedField(entry, 'grade_type_id'), entry?.grade_type_id);
+  const normalized = raw.toLowerCase();
+  if (normalized.includes('course') || normalized.includes('final') || normalized.includes('konc')) {
+    return 'Ocena końcowa';
+  }
+  return fallback;
+}
+
+function isGradeEntryLike(entry) {
+  if (!entry || typeof entry !== 'object') return false;
+  return Boolean(gradeValue(entry))
+    || 'passes' in entry
+    || 'exam_id' in entry
+    || 'exam_session_number' in entry
+    || 'date_acquisition' in entry
+    || 'date_modified' in entry
+    || 'grade_type_id' in entry
+    || ('grade' in entry && typeof entry.grade === 'object');
+}
+
+function flattenGradeEntries(value) {
+  if (Array.isArray(value)) {
+    return value.flatMap((entry) => flattenGradeEntries(entry));
+  }
+  if (!value || typeof value !== 'object') return [];
+  if (isGradeEntryLike(value)) return [value];
+  return Object.values(value).flatMap((entry) => flattenGradeEntries(entry));
 }
 
 function mapSingleGrade(entry, course, type, ects) {
@@ -214,63 +288,135 @@ function mapSingleGrade(entry, course, type, ects) {
     subjectName: course.name || course.id,
     grade: gradeValue(entry),
     weight: ects,
-    type,
+    type: course.activityType || gradeTypeLabel(entry, type),
     teacher: '',
     date: formatIsoDate(entry?.date_acquisition || entry?.date_modified),
   };
 }
 
-export function mapGrades({ termId, coursesResponse, ectsResponse, gradesResponse }) {
-  const courses = buildCourseMapForTerm(coursesResponse, termId);
-  const termGrades = gradesResponse?.[termId] && typeof gradesResponse[termId] === 'object' ? gradesResponse[termId] : {};
-  for (const courseId of Object.keys(termGrades)) {
-    if (!courses.has(courseId)) {
-      courses.set(courseId, { id: courseId, name: courseId, ects: 0 });
-    }
-  }
+function latestGradeCourse(entry) {
+  const edition = entry?.course_edition && typeof entry.course_edition === 'object' ? entry.course_edition : {};
+  const course = edition?.course && typeof edition.course === 'object' ? edition.course : edition;
+  const id = firstNonEmpty(course?.id, edition?.course_id, entry?.course_id, entry?.course?.id);
+  return {
+    id,
+    termId: firstNonEmpty(edition?.term_id, entry?.term_id),
+    name: courseName(course) || courseName(edition) || id,
+    activityType: courseActivityLabel(id),
+    ects: parseFlexibleNumber(edition?.ects_credits_simplified ?? course?.ects_credits_simplified),
+  };
+}
 
+function gradeDedupeKey(grade) {
+  return [
+    grade.subjectName,
+    grade.grade,
+    grade.type,
+    grade.date,
+    grade.weight,
+  ].join('|').toLowerCase();
+}
+
+function gradeSubjectKey(grade) {
+  return firstNonEmpty(grade?.subjectName, 'Przedmiot');
+}
+
+function keepSubjectsWithAnyGrade(grades) {
+  const subjectsWithGrade = new Set(
+    grades
+      .filter((grade) => grade?.grade?.trim())
+      .map(gradeSubjectKey),
+  );
+
+  return grades.filter((grade) => subjectsWithGrade.has(gradeSubjectKey(grade)));
+}
+
+export function mapGrades({ termId = '', termIds: scopedTermIds = null, coursesResponse, ectsResponse, gradesResponse, latestGrades = [] }) {
+  const termIds = termId
+    ? [termId]
+    : (Array.isArray(scopedTermIds) && scopedTermIds.length
+        ? [...new Set(scopedTermIds.filter(Boolean))]
+        : collectCourseTermIds(coursesResponse, gradesResponse));
   const out = [];
-  for (const courseId of [...courses.keys()].sort((a, b) => (courses.get(a)?.name || a).localeCompare(courses.get(b)?.name || b, 'pl'))) {
-    const course = courses.get(courseId);
-    const ects = parseFlexibleNumber(ectsResponse?.[termId]?.[courseId]) || course.ects || 0;
-    const courseGradeData = termGrades?.[courseId] && typeof termGrades[courseId] === 'object' ? termGrades[courseId] : {};
-    let hasAnyGrade = false;
+  const seen = new Set();
 
-    for (const entry of asArray(courseGradeData.course_grades).filter(Boolean)) {
-      out.push(mapSingleGrade(entry, course, 'Ocena końcowa', ects));
-      hasAnyGrade = true;
-    }
+  const pushGrade = (grade) => {
+    if (!grade?.grade?.trim()) return false;
+    const key = gradeDedupeKey(grade);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    out.push(grade);
+    return true;
+  };
 
-    const unitGrades = courseGradeData.course_units_grades && typeof courseGradeData.course_units_grades === 'object'
-      ? courseGradeData.course_units_grades
-      : {};
-    for (const entries of Object.values(unitGrades)) {
-      for (const entry of asArray(entries).filter(Boolean)) {
-        out.push(mapSingleGrade(entry, course, 'Zaliczenie', ects));
-        hasAnyGrade = true;
+  for (const currentTermId of termIds) {
+    const courses = buildCourseMapForTerm(coursesResponse, currentTermId);
+    const termGrades = gradesResponse?.[currentTermId] && typeof gradesResponse[currentTermId] === 'object' ? gradesResponse[currentTermId] : {};
+    for (const courseId of Object.keys(termGrades)) {
+      if (!courses.has(courseId)) {
+        courses.set(courseId, { id: courseId, name: courseId, activityType: courseActivityLabel(courseId), ects: 0 });
       }
     }
 
-    if (!hasAnyGrade && course.grades?.length) {
-      for (const entry of course.grades) {
-        out.push(mapSingleGrade(entry, course, 'Ocena końcowa', ects));
-        hasAnyGrade = true;
-      }
-    }
+    for (const courseId of [...courses.keys()].sort((a, b) => (courses.get(a)?.name || a).localeCompare(courses.get(b)?.name || b, 'pl'))) {
+      const course = courses.get(courseId);
+      const ects = parseFlexibleNumber(ectsResponse?.[currentTermId]?.[courseId]) || course.ects || 0;
+      const courseGradeData = termGrades?.[courseId] && typeof termGrades[courseId] === 'object' ? termGrades[courseId] : {};
+      let hasAnyGrade = false;
 
-    if (!hasAnyGrade) {
-      out.push({
-        subjectName: course.name || course.id,
-        grade: '',
-        weight: ects,
-        type: '',
-        teacher: '',
-        date: '',
-      });
+      for (const entry of flattenGradeEntries(courseGradeData.course_grades)) {
+        hasAnyGrade = pushGrade(mapSingleGrade(entry, course, course.activityType || 'Ocena końcowa', ects)) || hasAnyGrade;
+      }
+
+      const unitGrades = courseGradeData.course_units_grades && typeof courseGradeData.course_units_grades === 'object'
+        ? courseGradeData.course_units_grades
+        : {};
+      for (const entries of Object.values(unitGrades)) {
+        for (const entry of flattenGradeEntries(entries)) {
+          hasAnyGrade = pushGrade(mapSingleGrade(entry, course, 'Zaliczenie', ects)) || hasAnyGrade;
+        }
+      }
+
+      if (!hasAnyGrade && course.grades?.length) {
+        for (const entry of flattenGradeEntries(course.grades)) {
+          hasAnyGrade = pushGrade(mapSingleGrade(entry, course, course.activityType || 'Ocena końcowa', ects)) || hasAnyGrade;
+        }
+      }
+
+      if (!hasAnyGrade && course.activityType) {
+        out.push({
+          subjectName: course.name || course.id,
+          grade: '',
+          weight: ects,
+          type: course.activityType || '',
+          teacher: '',
+          date: '',
+        });
+      }
     }
   }
 
-  return out;
+  for (const entry of asArray(latestGrades).filter(Boolean)) {
+    const course = latestGradeCourse(entry);
+    if (!course.id && !course.name) continue;
+    const ects = parseFlexibleNumber(ectsResponse?.[course.termId]?.[course.id]) || course.ects || 0;
+    pushGrade(mapSingleGrade(entry, course, 'Ocena końcowa', ects));
+  }
+
+  const visibleGrades = keepSubjectsWithAnyGrade(out);
+
+  if (!termId) {
+    return visibleGrades.sort((left, right) => {
+      const subjectOrder = left.subjectName.localeCompare(right.subjectName, 'pl');
+      if (subjectOrder !== 0) return subjectOrder;
+      const leftFinal = gradeTypeLabel(left, left.type) === 'Ocena końcowa' ? 0 : 1;
+      const rightFinal = gradeTypeLabel(right, right.type) === 'Ocena końcowa' ? 0 : 1;
+      if (leftFinal !== rightFinal) return leftFinal - rightFinal;
+      return left.type.localeCompare(right.type, 'pl');
+    });
+  }
+
+  return visibleGrades;
 }
 
 function moneyText(value, currency = 'PLN') {

@@ -127,12 +127,6 @@ const pl: Record<string, string> = {
     'info.ectsProgress': 'Postęp ECTS',
     'info.ectsProgramme': 'Wybrany kierunek',
     'info.ectsOverall': 'Ogółem',
-    'info.surveysTitle': 'Ankiety do wypełnienia',
-    'info.surveysNeedsLogin': 'Zaloguj się ponownie przez USOS, żeby udzielić zgody na ankiety.',
-    'info.surveysEmpty': 'Brak ankiet do wypełnienia.',
-    'info.surveyUntil': 'do',
-    'info.surveyOpen': 'Do wypełnienia',
-    'info.surveyDone': 'Zamknięta',
 
     // Settings
     'settings.refresh': 'Odświeżanie',
@@ -483,12 +477,6 @@ const en: Record<string, string> = {
     'info.ectsProgress': 'ECTS progress',
     'info.ectsProgramme': 'Selected programme',
     'info.ectsOverall': 'Overall',
-    'info.surveysTitle': 'Surveys to fill',
-    'info.surveysNeedsLogin': 'Log in through USOS again to grant survey access.',
-    'info.surveysEmpty': 'No surveys to fill.',
-    'info.surveyUntil': 'until',
-    'info.surveyOpen': 'To fill',
-    'info.surveyDone': 'Closed',
 
     // Settings
     'settings.refresh': 'Refresh',

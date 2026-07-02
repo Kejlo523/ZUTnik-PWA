@@ -24,8 +24,8 @@ function test(name, fn) {
 }
 
 test('validates required OAuth scopes exactly', () => {
-  assert.deepEqual(missingRequiredScopes('studies|grades|payments|cards|photo|crstests|surveys_filling|offline_access'), []);
-  assert.deepEqual(missingRequiredScopes('studies|grades|photo'), ['payments', 'cards', 'crstests', 'surveys_filling', 'offline_access']);
+  assert.deepEqual(missingRequiredScopes('studies|grades|payments|cards|photo|crstests|offline_access'), []);
+  assert.deepEqual(missingRequiredScopes('studies|grades|photo'), ['payments', 'cards', 'crstests', 'offline_access']);
 });
 
 test('maps student programme id separately from programme id', () => {

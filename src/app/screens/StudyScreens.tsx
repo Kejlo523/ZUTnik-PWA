@@ -10,7 +10,6 @@ import type {
   Study,
   StudyDetails,
   StudyHistoryItem,
-  SurveyItem,
 } from '../../types';
 import type { AppSettings } from '../../services/storage';
 import type { GroupedGradeView, TranslateFn } from '../viewTypes';
@@ -326,10 +325,6 @@ function formatNullableNumber(value: number | null | undefined, fractionDigits =
     minimumFractionDigits: Math.abs(value - Math.round(value)) > 0.0001 ? fractionDigits : 0,
     maximumFractionDigits: fractionDigits,
   }).format(value);
-}
-
-function hasMissingScope(scopes: string[], scope: string): boolean {
-  return scopes.includes(scope);
 }
 
 function InfoMainLoadingSkeleton() {
@@ -848,8 +843,6 @@ interface InfoScreenProps {
   els: ElsCard | null;
   calendarEvents: CalendarEvent[];
   credits: CreditSummary | null;
-  surveys: SurveyItem[];
-  surveysMissingScopes: string[];
 }
 
 export function InfoScreen({
@@ -866,14 +859,9 @@ export function InfoScreen({
   els,
   calendarEvents,
   credits,
-  surveys,
-  surveysMissingScopes,
 }: InfoScreenProps) {
   const hasSideColumn = !!session || studies.length > 0;
   const showInfoSkeleton = infoLoading && !details && history.length === 0 && !els && calendarEvents.length === 0;
-  const showSurveysCard = surveys.length > 0
-    || hasMissingScope(surveysMissingScopes, 'surveys_filling')
-    || (!infoLoading && !!details);
 
   return (
     <section className={`screen info-screen${hasSideColumn ? '' : ' info-screen-full'}`}>
@@ -957,34 +945,6 @@ export function InfoScreen({
                   <span className="history-status">{h.status}</span>
                 </div>
               ))}
-            </div>
-          )}
-
-          {showSurveysCard && (
-            <div className="info-card surveys-card">
-              <div className="info-card-head">{t('info.surveysTitle')}</div>
-              {hasMissingScope(surveysMissingScopes, 'surveys_filling') ? (
-                <div className="info-inline-note">{t('info.surveysNeedsLogin')}</div>
-              ) : surveys.length === 0 ? (
-                <div className="info-inline-note">{t('info.surveysEmpty')}</div>
-              ) : (
-                surveys.map((survey) => (
-                  <div key={survey.id} className="survey-row">
-                    <div className="survey-main">
-                      <div className="survey-title">{survey.title}</div>
-                      <div className="survey-meta">
-                        {[survey.type, survey.courseName, survey.lecturerName, survey.endDate ? `${t('info.surveyUntil')} ${survey.endDate}` : ''].filter(Boolean).join(' · ')}
-                      </div>
-                      {survey.headlineHtml && (
-                        <div className="survey-headline" dangerouslySetInnerHTML={{ __html: survey.headlineHtml }} />
-                      )}
-                    </div>
-                    <span className={`survey-status ${survey.canFillOut ? 'open' : 'done'}`}>
-                      {survey.canFillOut ? t('info.surveyOpen') : t('info.surveyDone')}
-                    </span>
-                  </div>
-                ))
-              )}
             </div>
           )}
 

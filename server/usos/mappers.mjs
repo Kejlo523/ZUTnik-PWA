@@ -5,7 +5,6 @@ export const REQUIRED_USOS_SCOPES = [
   'cards',
   'photo',
   'crstests',
-  'surveys_filling',
   'offline_access',
 ];
 

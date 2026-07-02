@@ -112,21 +112,6 @@ export interface CreditSummary {
   overallUsed: number | null;
 }
 
-export interface SurveyItem {
-  id: string;
-  title: string;
-  type: string;
-  startDate: string;
-  endDate: string;
-  canFillOut: boolean;
-  didFillOut: boolean;
-  headlineHtml: string;
-  courseName: string;
-  lecturerName: string;
-  facultyName: string;
-  programmeName: string;
-}
-
 export interface CourseTestScore {
   id: string;
   name: string;

@@ -14,7 +14,6 @@ import type {
   Study,
   StudyDetails,
   StudyHistoryItem,
-  SurveyItem,
   UsosSessionData,
   ViewMode,
 } from '../types';
@@ -31,7 +30,7 @@ import { loadOrCreateDeviceId } from './storage';
 const API_BASE = import.meta.env.VITE_API_BASE ?? (import.meta.env.DEV ? '/api' : `${import.meta.env.BASE_URL}api`);
 const DEVICE_ID = loadOrCreateDeviceId();
 const SESSION_EXPIRED_MESSAGE = 'Sesja wygasła, zaloguj się ponownie';
-const USOS_LOGIN_SCOPES = 'studies|grades|payments|cards|photo|crstests|surveys_filling|offline_access';
+const USOS_LOGIN_SCOPES = 'studies|grades|payments|cards|photo|crstests|offline_access';
 
 interface UsosProfileUser {
   id?: string | number;
@@ -502,18 +501,6 @@ export async function fetchCreditSummary(session: SessionData, studyId: string |
   if (!session.usos) return null;
   const body = await postUsosEndpoint<{ summary?: CreditSummary }>(session.usos, '/usos/credits', { studyId });
   return body.summary ?? null;
-}
-
-export async function fetchSurveysToFill(session: SessionData): Promise<{ items: SurveyItem[]; missingScopes: string[] }> {
-  if (!session.usos || !hasUsosScope(session, 'surveys_filling')) {
-    return { items: [], missingScopes: ['surveys_filling'] };
-  }
-
-  const body = await postUsosEndpoint<{ items?: SurveyItem[]; missingScopes?: string[] }>(session.usos, '/usos/surveys');
-  return {
-    items: ensureArray<SurveyItem>(body.items),
-    missingScopes: normalizeStringArray(body.missingScopes),
-  };
 }
 
 async function fetchUsosNews(): Promise<NewsItem[]> {

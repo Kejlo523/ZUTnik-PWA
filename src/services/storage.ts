@@ -12,7 +12,6 @@ import type {
   Study,
   StudyDetails,
   StudyHistoryItem,
-  SurveyItem,
 } from '../types';
 
 const SESSION_KEY = 'zutnik_pwa_session';
@@ -226,11 +225,11 @@ export const cache = {
   loadFinanceForce: (studyId: string): FinanceSnapshot | null => loadCForce(ck('finance', studyId)),
 
   // Info per study
-  saveInfo: (studyId: string, data: { details: StudyDetails | null; history: StudyHistoryItem[]; els?: ElsCard | null; calendarEvents?: CalendarEvent[]; credits?: CreditSummary | null; surveys?: SurveyItem[]; surveysMissingScopes?: string[] }) =>
+  saveInfo: (studyId: string, data: { details: StudyDetails | null; history: StudyHistoryItem[]; els?: ElsCard | null; calendarEvents?: CalendarEvent[]; credits?: CreditSummary | null }) =>
     saveC(ck('info', studyId), data),
-  loadInfo: (studyId: string): { details: StudyDetails | null; history: StudyHistoryItem[]; els?: ElsCard | null; calendarEvents?: CalendarEvent[]; credits?: CreditSummary | null; surveys?: SurveyItem[]; surveysMissingScopes?: string[] } | null =>
+  loadInfo: (studyId: string): { details: StudyDetails | null; history: StudyHistoryItem[]; els?: ElsCard | null; calendarEvents?: CalendarEvent[]; credits?: CreditSummary | null } | null =>
     loadC(ck('info', studyId), TTL_MS.info),
-  loadInfoForce: (studyId: string): { details: StudyDetails | null; history: StudyHistoryItem[]; els?: ElsCard | null; calendarEvents?: CalendarEvent[]; credits?: CreditSummary | null; surveys?: SurveyItem[]; surveysMissingScopes?: string[] } | null =>
+  loadInfoForce: (studyId: string): { details: StudyDetails | null; history: StudyHistoryItem[]; els?: ElsCard | null; calendarEvents?: CalendarEvent[]; credits?: CreditSummary | null } | null =>
     loadCForce(ck('info', studyId)),
 
   // Plan (keyed by viewMode+date+studyId)

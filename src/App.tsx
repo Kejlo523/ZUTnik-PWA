@@ -15,7 +15,6 @@ import type {
   Study,
   StudyDetails,
   StudyHistoryItem,
-  SurveyItem,
   ViewMode,
 } from './types';
 import {
@@ -33,7 +32,6 @@ import {
   fetchPlanWindow,
   fetchStatsSnapshot,
   fetchStudentPhotoBlob,
-  fetchSurveysToFill,
   fetchUsosRequestToken,
   getFriendlyErrorMessage,
   isSessionExpiredError,
@@ -415,8 +413,6 @@ function App() {
   const [els, setEls] = useState<ElsCard | null>(null);
   const [calendarEvents, setCalendarEvents] = useState<CalendarEvent[]>([]);
   const [credits, setCredits] = useState<CreditSummary | null>(null);
-  const [surveys, setSurveys] = useState<SurveyItem[]>([]);
-  const [surveysMissingScopes, setSurveysMissingScopes] = useState<string[]>([]);
   const [infoLoading, setInfoLoading] = useState(false);
   const [studentPhotoError, setStudentPhotoError] = useState(false);
 
@@ -431,12 +427,6 @@ function App() {
 
   const activeStudyId = session?.activeStudyId ?? studies[0]?.przynaleznoscId ?? null;
   const canOpenStats = useMemo(() => normalizeStatsAlbum(session?.userId) === STATS_OWNER_ALBUM, [session?.userId]);
-  const sessionScopes = useMemo(() => session?.usos?.scopes ?? [], [session?.usos?.scopes]);
-  const effectiveSurveysMissingScopes = useMemo(() => {
-    const missing = new Set(surveysMissingScopes);
-    if (session && !sessionScopes.includes('surveys_filling')) missing.add('surveys_filling');
-    return [...missing];
-  }, [surveysMissingScopes, session, sessionScopes]);
   const currentPlanAlbum = useMemo(() => (planResult?.debug.album || '').trim(), [planResult?.debug.album]);
   const hiddenPlanSubjectKeys = useMemo(() => (
     currentPlanAlbum ? (planHiddenSubjectKeysByAlbum[currentPlanAlbum] ?? []) : []
@@ -1384,17 +1374,14 @@ function App() {
       if (forceCached.els) setEls(forceCached.els);
       if (forceCached.calendarEvents) setCalendarEvents(forceCached.calendarEvents);
       if ('credits' in forceCached) setCredits(forceCached.credits ?? null);
-      if (forceCached.surveys) setSurveys(forceCached.surveys);
-      if (forceCached.surveysMissingScopes) setSurveysMissingScopes(forceCached.surveysMissingScopes);
     }
     if (cache.loadInfo(activeStudyId) && !forceRefresh) return; // fresh cache, skip fetch
     setInfoLoading(true);
     setGlobalError('');
     try {
-      const [infoResult, creditsResult, surveysResult] = await Promise.allSettled([
+      const [infoResult, creditsResult] = await Promise.allSettled([
         fetchInfo(session, activeStudyId),
         fetchCreditSummary(session, activeStudyId),
-        fetchSurveysToFill(session),
       ]);
 
       if (infoResult.status === 'rejected') throw infoResult.reason;
@@ -1402,8 +1389,6 @@ function App() {
       const payload = {
         ...infoResult.value,
         credits: creditsResult.status === 'fulfilled' ? creditsResult.value : null,
-        surveys: surveysResult.status === 'fulfilled' ? surveysResult.value.items : [],
-        surveysMissingScopes: surveysResult.status === 'fulfilled' ? surveysResult.value.missingScopes : [],
       };
       cache.saveInfo(activeStudyId, payload);
       setDetails(payload.details);
@@ -1411,8 +1396,6 @@ function App() {
       setEls(payload.els ?? null);
       setCalendarEvents(payload.calendarEvents ?? []);
       setCredits(payload.credits ?? null);
-      setSurveys(payload.surveys ?? []);
-      setSurveysMissingScopes(payload.surveysMissingScopes ?? []);
     } catch (e) {
       if (handleSessionError(e)) return;
       if (!forceCached) showGlobalError(e, 'Nie można pobrać danych.');
@@ -1495,8 +1478,6 @@ function App() {
     setEls(null);
     setCalendarEvents([]);
     setCredits(null);
-    setSurveys([]);
-    setSurveysMissingScopes([]);
     setPlanResult(null);
     setSelectedPlanEvent(null);
 
@@ -2593,8 +2574,6 @@ function App() {
         els={els}
         calendarEvents={calendarEvents}
         credits={credits}
-        surveys={surveys}
-        surveysMissingScopes={effectiveSurveysMissingScopes}
       />
     );
   }

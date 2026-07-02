@@ -816,6 +816,35 @@ async function fetchCourseEditionGradesByCourse(token, secret, termId, courseIds
   };
 }
 
+async function fetchGradesCoursesResponse(token, secret, activeTermsOnly) {
+  const fieldSelectors = [COURSE_WITH_GRADES_FIELDS, COURSE_FIELDS];
+  let gatewayError = null;
+
+  for (let index = 0; index < fieldSelectors.length; index += 1) {
+    try {
+      return await fetchUsosJson('services/courses/user', {
+        token,
+        secret,
+        tokenMode: 'required',
+        params: {
+          fields: fieldSelectors[index],
+          active_terms_only: activeTermsOnly,
+        },
+      });
+    } catch (error) {
+      if (isUsosGatewayError(error)) {
+        gatewayError = error;
+        continue;
+      }
+      if (index === 0) continue;
+      throw error;
+    }
+  }
+
+  if (gatewayError) return null;
+  return null;
+}
+
 function mergeGradesResponse(target, source) {
   if (!source || typeof source !== 'object') return target;
   for (const [termId, termData] of Object.entries(source)) {
@@ -1189,23 +1218,15 @@ app.post('/api/usos/grades', async (req, res) => {
     const termId = firstNonEmpty(req.body?.termId);
     const activeTermsOnly = termId ? 'false' : 'true';
 
-    const coursesResponse = await fetchUsosJson('services/courses/user', {
-      token,
-      secret,
-      tokenMode: 'required',
-      params: {
-        fields: COURSE_WITH_GRADES_FIELDS,
-        active_terms_only: activeTermsOnly,
-      },
-    }).catch(() => fetchUsosJson('services/courses/user', {
-      token,
-      secret,
-      tokenMode: 'required',
-      params: {
-        fields: COURSE_FIELDS,
-        active_terms_only: activeTermsOnly,
-      },
-    }));
+    const coursesResponse = await fetchGradesCoursesResponse(token, secret, activeTermsOnly);
+    if (!coursesResponse) {
+      return res.json({
+        grades: [],
+        temporaryUnavailable: true,
+        error: 'USOS jest teraz chwilowo niedostępny. Spróbuj ponownie za chwilę.',
+      });
+    }
+
     const termIds = termId ? [termId] : getTermIdsForCourses(coursesResponse);
     if (!termIds.length) {
       return res.json({ grades: [] });

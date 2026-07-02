@@ -152,6 +152,10 @@ function formatCreditMetric(value: number | null | undefined, fallback: number):
   }).format(Math.max(0, source));
 }
 
+function keepRealGrades(items: Grade[]): Grade[] {
+  return items.filter((item) => item.grade?.trim());
+}
+
 function getPositiveViewportNumbers(values: Array<number | undefined>): number[] {
   return values.filter((value): value is number => typeof value === 'number' && Number.isFinite(value) && value > 0);
 }
@@ -1203,15 +1207,22 @@ function App() {
 
     if (!(await ensureSessionStillValid(session))) return;
 
-    const gradesCacheKey = `${session.userId || 'usos'}_active_terms_v4`;
+    const gradesCacheBase = session.userId || 'usos';
+    const gradesCacheKey = `${gradesCacheBase}_active_terms_v4`;
+    const gradesCacheKeys = [gradesCacheKey, `${gradesCacheBase}_active_terms_v3`];
     let hasCachedGrades = false;
     if (!forceRefresh) {
-      const cached = cache.loadGradesForce(gradesCacheKey);
+      const cached = gradesCacheKeys.map((key) => cache.loadGradesForce(key)).find((items): items is Grade[] => Boolean(items));
       if (cached) {
-        hasCachedGrades = cached.length > 0;
-        setGrades(cached);
+        const cleanedCached = keepRealGrades(cached);
+        hasCachedGrades = cleanedCached.length > 0;
+        setGrades(cleanedCached);
       }
-      if (cache.loadGrades(gradesCacheKey)) {
+      const freshCached = gradesCacheKeys.map((key) => cache.loadGrades(key)).find((items): items is Grade[] => Boolean(items));
+      if (freshCached) {
+        const cleanedFreshCached = keepRealGrades(freshCached);
+        cache.saveGrades(gradesCacheKey, cleanedFreshCached);
+        setGrades(cleanedFreshCached);
         if (!credits) {
           void fetchCreditSummary(session, activeStudyId).then((summary) => {
             if (summary) setCredits(summary);
@@ -1236,7 +1247,7 @@ function App() {
         throw gradesResult.reason;
       }
 
-      const fresh = gradesResult.value;
+      const fresh = keepRealGrades(gradesResult.value);
       cache.saveGrades(gradesCacheKey, fresh);
       setGrades(fresh);
     } catch (e) {

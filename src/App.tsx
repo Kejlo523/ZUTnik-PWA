@@ -436,10 +436,14 @@ function App() {
     if (session && !sessionScopes.includes('surveys_filling')) missing.add('surveys_filling');
     return [...missing];
   }, [surveysMissingScopes, session, sessionScopes]);
-  const currentPlanAlbum = useMemo(() => (planResult?.debug.album || gradesPlanAlbum || '').trim(), [gradesPlanAlbum, planResult?.debug.album]);
+  const currentPlanAlbum = useMemo(() => (planResult?.debug.album || '').trim(), [planResult?.debug.album]);
   const hiddenPlanSubjectKeys = useMemo(() => (
     currentPlanAlbum ? (planHiddenSubjectKeysByAlbum[currentPlanAlbum] ?? []) : []
   ), [currentPlanAlbum, planHiddenSubjectKeysByAlbum]);
+  const gradesPlanFilterAlbum = useMemo(() => (gradesPlanAlbum || currentPlanAlbum || '').trim(), [currentPlanAlbum, gradesPlanAlbum]);
+  const hiddenGradesPlanSubjectKeys = useMemo(() => (
+    gradesPlanFilterAlbum ? (planHiddenSubjectKeysByAlbum[gradesPlanFilterAlbum] ?? []) : []
+  ), [gradesPlanFilterAlbum, planHiddenSubjectKeysByAlbum]);
 
   useEffect(() => {
     planHiddenSubjectKeysByAlbumRef.current = planHiddenSubjectKeysByAlbum;
@@ -1459,7 +1463,10 @@ function App() {
     if (!session || screen === prevScreen.current) return;
     prevScreen.current = screen;
     if (screen === 'plan') void loadPlanData();
-    if (screen === 'grades') void loadGradesData();
+    if (screen === 'grades') {
+      void loadGradesData();
+      void loadGradesPlanFilters();
+    }
     if (screen === 'finance') void loadFinanceData();
     if (screen === 'info') void loadInfoData();
     if (screen === 'news') void loadNewsData();
@@ -1510,10 +1517,10 @@ function App() {
   // ── Computed values ───────────────────────────────────────────────────────
 
   const hiddenGradePlanFilterItems = useMemo(() => {
-    if (!hiddenPlanSubjectKeys.length || !gradesPlanSubjectFilters.length) return [];
-    const hiddenKeys = new Set(hiddenPlanSubjectKeys);
+    if (!hiddenGradesPlanSubjectKeys.length || !gradesPlanSubjectFilters.length) return [];
+    const hiddenKeys = new Set(hiddenGradesPlanSubjectKeys);
     return gradesPlanSubjectFilters.filter((item) => hiddenKeys.has(item.key));
-  }, [gradesPlanSubjectFilters, hiddenPlanSubjectKeys]);
+  }, [gradesPlanSubjectFilters, hiddenGradesPlanSubjectKeys]);
 
   const visibleGrades = useMemo(() => {
     if (!grades.length) return [];
@@ -1556,7 +1563,7 @@ function App() {
         .map((subject) => normalizePlanFilterString(subject))
         .filter(Boolean),
     );
-    const hiddenKeys = new Set(hiddenPlanSubjectKeys);
+    const hiddenKeys = new Set(hiddenGradesPlanSubjectKeys);
 
     for (const item of gradesPlanSubjectFilters) {
       if (!item.key || hiddenKeys.has(item.key)) continue;
@@ -1596,7 +1603,7 @@ function App() {
       })
       .filter((group) => group.items.length > 0 || group.finalGrade.trim() || group.emptyFromPlanFilter)
       .sort((a, b) => a.subject.localeCompare(b.subject, 'pl'));
-  }, [gradesPlanSubjectFilters, hiddenPlanSubjectKeys, visibleGrades]);
+  }, [gradesPlanSubjectFilters, hiddenGradesPlanSubjectKeys, visibleGrades]);
 
   useEffect(() => {
     setExpandedGradeSubjects(prev => {

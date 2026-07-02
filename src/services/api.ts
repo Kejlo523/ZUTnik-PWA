@@ -24,6 +24,7 @@ import {
   getPlanEventFilterTypeKey,
   getPlanEventSubjectLabel,
   normalizePlanFilterKey,
+  normalizePlanFilterString,
 } from '../planFilters';
 import { loadOrCreateDeviceId } from './storage';
 
@@ -741,23 +742,24 @@ function formatHm(date: Date): string {
 
 function eventTypeClass(event: Record<string, string>): string {
   const status = event.lessonStatusShort.toLowerCase();
-  const form = event.lessonForm.toLowerCase();
-  const short = event.lessonFormShort.toLowerCase();
-  const hay = `${form} ${(event.subject || event.title).toLowerCase()}`;
+  const form = normalizePlanFilterString(event.lessonForm);
+  const short = normalizePlanFilterString(event.lessonFormShort);
+  const subject = normalizePlanFilterString(event.subject || event.title);
+  const hay = `${form} ${subject}`;
 
   if (status === 'e') return 'exam';
   if (status === 'o') return 'cancelled';
   if (status === 'zz') return 'remote';
-  if (hay.includes('laboratorium') || short === 'l') return 'lab';
-  if (hay.includes('audytoryjne') || short === 'a') return 'auditory';
-  if (hay.includes('wyklad') || hay.includes('wykład') || short === 'w') return 'lecture';
+  if (hay.includes('laboratorium') || hay.includes('laboratory') || form.includes(' lab') || short === 'l' || short.includes('lab')) return 'lab';
+  if (hay.includes('audytoryjne') || hay.includes('auditory') || hay.includes('auditorium') || hay.includes('cwiczen') || short === 'a' || short === 'cw' || short.includes('aud')) return 'auditory';
+  if (hay.includes('wyklad') || hay.includes('lecture') || short === 'w' || short.includes('wyk') || short.includes('lec')) return 'lecture';
   if (hay.includes('egzamin') || form.includes('exam')) return 'exam';
   if (hay.includes('zdalne') || form.includes('remote')) return 'remote';
   if (hay.includes('zaliczenie') || short.startsWith('zal')) return 'pass';
   if (hay.includes('projekt') || short === 'p') return 'project';
   if (hay.includes('seminarium') || short === 's') return 'seminar';
   if (hay.includes('dyplomowe')) return 'diploma';
-  if (hay.includes('lektorat') || short === 'le') return 'lectorate';
+  if (hay.includes('lektorat') || hay.includes('lectorate') || hay.includes('language course') || short === 'le' || short === 'lek' || short.includes('lector')) return 'lectorate';
   if (hay.includes('konwersatorium') || short === 'k') return 'conservatory';
   if (hay.includes('konsultacje')) return 'consultation';
   if (hay.includes('terenowe')) return 'field';
@@ -942,6 +944,19 @@ function buildPlanSubjectFilters(dayColumns: PlanResult['dayColumns']): PlanResu
   return [...subjectFilterMap.values()].sort((a, b) => a.label.localeCompare(b.label, 'pl'));
 }
 
+function isRegularSubjectFilterEvent(event: Record<string, string>): boolean {
+  const subject = firstNonEmpty(event.subject, event.title);
+  if (!subject) return false;
+
+  const status = normalizePlanFilterString(event.lessonStatusShort);
+  return status !== 'e'
+    && status !== 'ez'
+    && status !== 'zal'
+    && status !== 'zalp'
+    && status !== 'zalzd'
+    && status !== 'zalzdp';
+}
+
 function resolvePlanAlbum(session: SessionData): string {
   const directAlbum = firstNonEmpty(session.userId);
   if (/^(s?\d{4,6})$/i.test(directAlbum)) {
@@ -1017,6 +1032,38 @@ function resolveSemesterRange(currentDateText: string, sessionPeriods: SessionPe
     current,
     rangeStart: startOfDay(rangeStart),
     rangeEnd: startOfDay(rangeEnd),
+  };
+}
+
+function resolveCurrentAcademicTermRange(currentDateText: string): { current: Date; rangeStart: Date; rangeEnd: Date } {
+  const current = parseYmdOrToday(currentDateText);
+  const month = current.getMonth() + 1;
+
+  if (month >= 10) {
+    const yearStart = current.getFullYear();
+    const yearEnd = yearStart + 1;
+    return {
+      current,
+      rangeStart: startOfDay(new Date(yearStart, 9, 1)),
+      rangeEnd: startOfDay(new Date(yearEnd, 2, 0)),
+    };
+  }
+
+  if (month <= 2) {
+    const yearEnd = current.getFullYear();
+    const yearStart = yearEnd - 1;
+    return {
+      current,
+      rangeStart: startOfDay(new Date(yearStart, 9, 1)),
+      rangeEnd: startOfDay(new Date(yearEnd, 2, 0)),
+    };
+  }
+
+  const year = current.getFullYear();
+  return {
+    current,
+    rangeStart: startOfDay(new Date(year, 2, 1)),
+    rangeEnd: startOfDay(new Date(year, 8, 30)),
   };
 }
 
@@ -1205,6 +1252,40 @@ export async function fetchPlanSemesterExport(
       entriesTotal: events.length,
       daysWithData: [...grouped.keys()].sort(),
     },
+  };
+}
+
+export async function fetchCurrentPlanSubjectFilters(
+  session: SessionData,
+  payload: { currentDate: string; studyId: string | null },
+): Promise<{
+  album: string;
+  subjectFilters: PlanResult['subjectFilters'];
+  rangeStart: string;
+  rangeEnd: string;
+  entriesTotal: number;
+}> {
+  void payload.studyId;
+  const { rangeStart, rangeEnd } = resolveCurrentAcademicTermRange(payload.currentDate);
+  const album = resolvePlanAlbum(session);
+  const urlParams = {
+    number: album,
+    start: toOffsetIso(new Date(rangeStart.getFullYear(), rangeStart.getMonth(), rangeStart.getDate(), 0, 0, 0)),
+    end: toOffsetIso(new Date(rangeEnd.getFullYear(), rangeEnd.getMonth(), rangeEnd.getDate(), 23, 59, 59)),
+  };
+
+  const rawEvents = await proxyPlanStudent(urlParams);
+  const events = rawEvents.map(parsePlanEventRow).filter((event): event is Record<string, string> => Boolean(event));
+  const regularEvents = events.filter(isRegularSubjectFilterEvent);
+  const grouped = groupPlanEventsByDay(regularEvents);
+  const { dayColumns } = buildPlanDayColumns(grouped, rangeStart, rangeEnd);
+
+  return {
+    album,
+    subjectFilters: buildPlanSubjectFilters(dayColumns),
+    rangeStart: formatYmd(rangeStart),
+    rangeEnd: formatYmd(rangeEnd),
+    entriesTotal: regularEvents.length,
   };
 }
 

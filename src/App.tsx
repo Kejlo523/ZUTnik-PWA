@@ -23,6 +23,7 @@ import {
   fetchCombinedGrades,
   fetchCombinedStudies,
   fetchCreditSummary,
+  fetchCurrentPlanSubjectFilters,
   fetchFinance,
   fetchInfo,
   fetchNews,
@@ -1197,15 +1198,14 @@ function App() {
     gradesPlanFilterRequestIdRef.current = requestId;
 
     try {
-      const result = await fetchPlanSemesterExport(session, {
+      const result = await fetchCurrentPlanSubjectFilters(session, {
         currentDate: todayYmd(),
         studyId: activeStudyId,
-        search: { category: 'album', query: '' },
       });
 
       if (gradesPlanFilterRequestIdRef.current !== requestId) return;
 
-      const album = (result.debug.album || '').trim();
+      const album = (result.album || '').trim();
       const filters = result.subjectFilters ?? [];
       gradesPlanFilterCacheRef.current[cacheKey] = { album, filters };
       setGradesPlanAlbum(album);

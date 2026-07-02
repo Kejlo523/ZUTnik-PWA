@@ -1182,7 +1182,7 @@ function App() {
       return;
     }
 
-    const cacheKey = `${session.userId || 'usos'}_${activeStudyId ?? 'nostudy'}_${todayYmd()}`;
+    const cacheKey = `${session.userId || 'usos'}_${activeStudyId ?? 'nostudy'}_${todayYmd()}_android_plan_filters_v2`;
     const cachedFiltersEntry = gradesPlanFilterCacheRef.current[cacheKey];
     if (!forceRefresh && cachedFiltersEntry) {
       setGradesPlanAlbum(cachedFiltersEntry.album);

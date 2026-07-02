@@ -6478,11 +6478,14 @@ button.outline {
   }
 
   .grades-screen {
+    max-width: 980px;
+    width: 100%;
+    margin: 0 auto;
     display: grid;
-    grid-template-columns: 340px minmax(0, 1fr);
+    grid-template-columns: minmax(0, 1fr);
     grid-template-areas:
-      "hero hero"
-      "filters list";
+      "hero"
+      "list";
     gap: 10px;
     align-items: start;
   }
@@ -6493,12 +6496,6 @@ button.outline {
 
   .grades-screen .grades-hero {
     grid-area: hero;
-  }
-
-  .grades-screen .grades-filters-container {
-    grid-area: filters;
-    position: sticky;
-    top: 8px;
   }
 
   .grades-screen .grades-surface {
@@ -6873,11 +6870,14 @@ button.outline {
   }
 
   .grades-screen {
+    max-width: 980px;
+    width: 100%;
+    margin: 0 auto;
     display: grid;
-    grid-template-columns: 340px minmax(0, 1fr);
+    grid-template-columns: minmax(0, 1fr);
     grid-template-areas:
-      "hero hero"
-      "filters list";
+      "hero"
+      "list";
     gap: 10px;
     align-items: start;
   }
@@ -6888,12 +6888,6 @@ button.outline {
 
   .grades-screen .grades-hero {
     grid-area: hero;
-  }
-
-  .grades-screen .grades-filters-container {
-    grid-area: filters;
-    position: sticky;
-    top: 8px;
   }
 
   .grades-screen .grades-surface {

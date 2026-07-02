@@ -42,11 +42,17 @@ export interface Semester {
 
 export interface Grade {
   subjectName: string;
+  courseId?: string;
   grade: string;
   weight: number;
   type: string;
   teacher: string;
   date: string;
+  gradeDescription?: string;
+  passes?: boolean | null;
+  countsIntoAverage?: boolean | null;
+  examId?: string;
+  examSessionNumber?: string;
 }
 
 export interface FinanceRecord {

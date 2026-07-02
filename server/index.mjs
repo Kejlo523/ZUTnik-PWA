@@ -454,6 +454,21 @@ function cleanQueryParams(params = {}) {
   return cleanParams;
 }
 
+function encodeUsosQueryValue(value) {
+  return encodeURIComponent(String(value))
+    .replace(/%7C/gi, '|')
+    .replace(/%5B/gi, '[')
+    .replace(/%5D/gi, ']')
+    .replace(/%2C/gi, ',')
+    .replace(/%3E/gi, '>');
+}
+
+function buildUsosQuery(params = {}) {
+  return Object.entries(params)
+    .map(([key, value]) => `${encodeURIComponent(key)}=${encodeUsosQueryValue(value)}`)
+    .join('&');
+}
+
 function cleanErrorText(value = '') {
   return String(value)
     .replace(/<script[\s\S]*?<\/script>/gi, ' ')
@@ -475,7 +490,10 @@ function getFriendlyUsosErrorMessage(status, value = '') {
   const normalized = cleaned.toLowerCase();
 
   if (
-    status === 503
+    status === 502
+    || status === 503
+    || status === 504
+    || normalized.includes('bad gateway')
     || normalized.includes('service unavailable')
     || normalized.includes('temporarily overloading')
     || normalized.includes('server is temporarily')
@@ -495,6 +513,22 @@ function getFriendlyUsosErrorMessage(status, value = '') {
 function sendUsosError(res, error) {
   const status = Number(error?.status) || 500;
   return res.status(status).json({ error: getFriendlyUsosErrorMessage(status, error?.message || 'USOS API error') });
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
+
+function isUsosGatewayError(error) {
+  const status = Number(error?.status) || 0;
+  const message = String(error?.message || '').toLowerCase();
+  return [500, 502, 503, 504].includes(status)
+    || message.includes('bad gateway')
+    || message.includes('service unavailable')
+    || message.includes('temporarily overloading')
+    || message.includes('server is temporarily');
 }
 
 async function fetchUsosJson(endpoint, {
@@ -525,7 +559,7 @@ async function fetchUsosJson(endpoint, {
   const cleanParams = cleanQueryParams(params);
   const sig = signOAuth1('GET', baseUrl, { ...oauthParams, ...cleanParams }, USOS_CONSUMER_SECRET, shouldUseToken ? secret : '');
   const authHeader = getAuthHeader(oauthParams, sig);
-  const query = new URLSearchParams(cleanParams).toString();
+  const query = buildUsosQuery(cleanParams);
   const fullUrl = query ? `${baseUrl}?${query}` : baseUrl;
 
   const response = await fetchWithTimeout(fullUrl, {
@@ -547,7 +581,7 @@ async function fetchUsosJson(endpoint, {
   try {
     return JSON.parse(body);
   } catch {
-    const error = new Error('Niepoprawny JSON z USOS API.');
+    const error = new Error(getFriendlyUsosErrorMessage(502, body || 'Niepoprawny JSON z USOS API.'));
     error.status = 502;
     throw error;
   }
@@ -578,8 +612,8 @@ const PROGRAMME_MIN_FIELDS = 'id|programme|status|admission_date|is_primary|stag
 const GRADE_FIELDS = 'value_symbol|passes|value_description|exam_id|exam_session_number|date_modified|date_acquisition|counts_into_average|grade_type_id';
 const COURSE_FIELDS = 'course_editions[course_id|course_name|term_id]|terms';
 const COURSE_WITH_GRADES_FIELDS = `course_editions[course_id|course_name|term_id|grades[${GRADE_FIELDS}]]|terms`;
-const GRADE_WITH_CONTEXT_FIELDS = `${GRADE_FIELDS}|course_edition[course_id|course_name|term_id|course[id|name]]`;
-const PAYMENT_FIELDS = 'id|saldo_amount|description|state|account_number|payment_deadline|total_amount|currency|debt_type|type';
+const GRADE_WITH_CONTEXT_FIELDS = `${GRADE_FIELDS}|course_edition[course_id|term_id|course[id|name|ects_credits_simplified]|ects_credits_simplified]|course[id|name|ects_credits_simplified]`;
+const PAYMENT_FIELDS = 'id|name|title|amount|due_date|status|is_paid|saldo_amount|description|state|account_number|payment_deadline|total_amount|currency|debt_type|type|paid_date';
 const CALENDAR_FIELDS = 'id|name|start_date|end_date|type|is_day_off';
 const NEWS_FIELDS = 'items[article[id|publication_date|title|headline_html|content_html|image_urls[720x405|360x203|original]]]|next_page|total';
 const SURVEY_FIELDS = 'id|survey_type|name|headline_html|start_date|end_date|can_i_fill_out|did_i_fill_out|group[course_unit[course_id|course_name|course[id|name]]]|lecturer[id|first_name|last_name]|faculty[id|name]|programme[id|name]';
@@ -720,16 +754,42 @@ function countGradesForTerms(gradesResponse, termIds) {
 }
 
 async function fetchGradesTerms2(token, secret, termIds, courseIds) {
+  const termIdsParam = Array.isArray(termIds) ? termIds.join('|') : firstNonEmpty(termIds);
+  const courseIdsParam = Array.isArray(courseIds) ? courseIds.join('|') : firstNonEmpty(courseIds);
   return fetchUsosJson('services/grades/terms2', {
     token,
     secret,
     tokenMode: 'required',
     params: {
-      term_ids: termIds.join('|'),
-      ...(courseIds.length ? { course_ids: courseIds.join('|') } : {}),
+      term_ids: termIdsParam,
+      ...(courseIdsParam ? { course_ids: courseIdsParam } : {}),
       fields: GRADE_FIELDS,
     },
   });
+}
+
+async function tryFetchGradesTerms2(token, secret, termIds, courseIds) {
+  const fetchWithGatewayRetries = async (scopedCourseIds) => {
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      try {
+        return await fetchGradesTerms2(token, secret, termIds, scopedCourseIds);
+      } catch (error) {
+        if (!isUsosGatewayError(error)) throw error;
+        if (attempt === 0) await sleep(750);
+      }
+    }
+    return null;
+  };
+
+  const scoped = await fetchWithGatewayRetries(courseIds);
+  if (scoped) return scoped;
+
+  if (Array.isArray(courseIds) && courseIds.length > 0) {
+    const unscoped = await fetchWithGatewayRetries([]);
+    if (unscoped) return unscoped;
+  }
+
+  return {};
 }
 
 async function fetchCourseEditionGradesByCourse(token, secret, termId, courseIds) {
@@ -754,6 +814,40 @@ async function fetchCourseEditionGradesByCourse(token, secret, termId, courseIds
   return {
     [termId]: Object.fromEntries(pairs.filter(([, data]) => data)),
   };
+}
+
+function mergeGradesResponse(target, source) {
+  if (!source || typeof source !== 'object') return target;
+  for (const [termId, termData] of Object.entries(source)) {
+    if (!termId || !termData || typeof termData !== 'object') continue;
+    target[termId] = {
+      ...(target[termId] && typeof target[termId] === 'object' ? target[termId] : {}),
+      ...termData,
+    };
+  }
+  return target;
+}
+
+async function resolveGradesForTerms(token, secret, termIds, coursesResponse) {
+  const courseIds = getCourseIdsForTerms(coursesResponse, termIds);
+  const gradesResponse = await tryFetchGradesTerms2(token, secret, termIds.join('|'), courseIds);
+  if (countGradesForTerms(gradesResponse, termIds) > 0) {
+    return gradesResponse;
+  }
+
+  const merged = {};
+  await Promise.all(termIds.map(async (termId) => {
+    const termCourseIds = getCourseIdsForTerm(coursesResponse, termId);
+    if (!termCourseIds.length) return;
+    const data = await fetchCourseEditionGradesByCourse(token, secret, termId, termCourseIds);
+    mergeGradesResponse(merged, data);
+  }));
+
+  if (countGradesForTerms(merged, termIds) > 0) {
+    return merged;
+  }
+
+  return Object.keys(gradesResponse || {}).length ? gradesResponse : merged;
 }
 
 function hasUsosScope(scopes, scope) {
@@ -1116,14 +1210,13 @@ app.post('/api/usos/grades', async (req, res) => {
     if (!termIds.length) {
       return res.json({ grades: [] });
     }
-    const courseIds = termId ? getCourseIdsForTerm(coursesResponse, termId) : getCourseIdsForTerms(coursesResponse, termIds);
     const [ectsResponse, gradesTermsResponse] = await Promise.all([
       fetchUsosJson('services/courses/user_ects_points', {
         token,
         secret,
         tokenMode: 'required',
       }).catch(() => ({})),
-      fetchGradesTerms2(token, secret, termIds, courseIds),
+      resolveGradesForTerms(token, secret, termIds, coursesResponse),
     ]);
     const latestGrades = termId || countGradesForTerms(gradesTermsResponse, termIds) > 0
       ? []
@@ -1136,10 +1229,7 @@ app.post('/api/usos/grades', async (req, res) => {
             fields: GRADE_WITH_CONTEXT_FIELDS,
           },
         }).then((items) => asArray(items).filter((entry) => termIds.includes(latestGradeTermId(entry)))).catch(() => []);
-    const gradesResponse = termId && countGradesForTerm(gradesTermsResponse, termId) === 0 && courseIds.length > 0
-      ? await fetchCourseEditionGradesByCourse(token, secret, termId, courseIds)
-      : gradesTermsResponse;
-    const grades = mapGrades({ termId, termIds, coursesResponse, ectsResponse, gradesResponse, latestGrades });
+    const grades = mapGrades({ termId, termIds, coursesResponse, ectsResponse, gradesResponse: gradesTermsResponse, latestGrades });
 
     return res.json({
       grades,

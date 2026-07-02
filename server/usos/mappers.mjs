@@ -284,19 +284,30 @@ function flattenGradeEntries(value) {
 }
 
 function mapSingleGrade(entry, course, type, ects) {
+  const grade = gradeValue(entry);
+  if (!grade.trim()) return null;
   return {
     subjectName: course.name || course.id,
-    grade: gradeValue(entry),
+    courseId: course.id,
+    grade,
     weight: ects,
     type: course.activityType || gradeTypeLabel(entry, type),
     teacher: '',
     date: formatIsoDate(entry?.date_acquisition || entry?.date_modified),
+    gradeDescription: localizedField(entry, 'value_description') || firstNonEmpty(entry?.value_description),
+    passes: entry?.passes ?? null,
+    countsIntoAverage: entry?.counts_into_average ?? null,
+    examId: firstNonEmpty(entry?.exam_id),
+    examSessionNumber: firstNonEmpty(entry?.exam_session_number),
   };
 }
 
 function latestGradeCourse(entry) {
   const edition = entry?.course_edition && typeof entry.course_edition === 'object' ? entry.course_edition : {};
-  const course = edition?.course && typeof edition.course === 'object' ? edition.course : edition;
+  const directCourse = entry?.course && typeof entry.course === 'object' ? entry.course : {};
+  const course = edition?.course && typeof edition.course === 'object'
+    ? edition.course
+    : (Object.keys(directCourse).length ? directCourse : edition);
   const id = firstNonEmpty(course?.id, edition?.course_id, entry?.course_id, entry?.course?.id);
   return {
     id,
@@ -315,20 +326,6 @@ function gradeDedupeKey(grade) {
     grade.date,
     grade.weight,
   ].join('|').toLowerCase();
-}
-
-function gradeSubjectKey(grade) {
-  return firstNonEmpty(grade?.subjectName, 'Przedmiot');
-}
-
-function keepSubjectsWithAnyGrade(grades) {
-  const subjectsWithGrade = new Set(
-    grades
-      .filter((grade) => grade?.grade?.trim())
-      .map(gradeSubjectKey),
-  );
-
-  return grades.filter((grade) => subjectsWithGrade.has(gradeSubjectKey(grade)));
 }
 
 export function mapGrades({ termId = '', termIds: scopedTermIds = null, coursesResponse, ectsResponse, gradesResponse, latestGrades = [] }) {
@@ -382,17 +379,6 @@ export function mapGrades({ termId = '', termIds: scopedTermIds = null, coursesR
           hasAnyGrade = pushGrade(mapSingleGrade(entry, course, course.activityType || 'Ocena końcowa', ects)) || hasAnyGrade;
         }
       }
-
-      if (!hasAnyGrade && course.activityType) {
-        out.push({
-          subjectName: course.name || course.id,
-          grade: '',
-          weight: ects,
-          type: course.activityType || '',
-          teacher: '',
-          date: '',
-        });
-      }
     }
   }
 
@@ -403,10 +389,8 @@ export function mapGrades({ termId = '', termIds: scopedTermIds = null, coursesR
     pushGrade(mapSingleGrade(entry, course, 'Ocena końcowa', ects));
   }
 
-  const visibleGrades = keepSubjectsWithAnyGrade(out);
-
   if (!termId) {
-    return visibleGrades.sort((left, right) => {
+    return out.sort((left, right) => {
       const subjectOrder = left.subjectName.localeCompare(right.subjectName, 'pl');
       if (subjectOrder !== 0) return subjectOrder;
       const leftFinal = gradeTypeLabel(left, left.type) === 'Ocena końcowa' ? 0 : 1;
@@ -416,7 +400,7 @@ export function mapGrades({ termId = '', termIds: scopedTermIds = null, coursesR
     });
   }
 
-  return visibleGrades;
+  return out;
 }
 
 function moneyText(value, currency = 'PLN') {
@@ -425,29 +409,57 @@ function moneyText(value, currency = 'PLN') {
   return `${new Intl.NumberFormat('pl-PL', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(num)} ${currency || 'PLN'}`;
 }
 
+function paymentStatusSymbol(row) {
+  return firstNonEmpty(row?.status?.symbol, row?.status, row?.state?.symbol, row?.state).toLowerCase();
+}
+
+function isPaymentPaid(row) {
+  const status = paymentStatusSymbol(row);
+  return row?.is_paid === true
+    || String(row?.is_paid || '').toLowerCase() === 'true'
+    || status === '1'
+    || status === 'paid'
+    || status.includes('settled')
+    || status.includes('closed')
+    || status.includes('rozlic');
+}
+
 function normalizePaymentBalance(row) {
+  const hasSaldo = firstNonEmpty(row?.saldo_amount);
   const saldo = parseFlexibleNumber(row?.saldo_amount);
-  const state = firstNonEmpty(row?.state?.symbol, row?.state).toLowerCase();
-  if (Math.abs(saldo) <= 0.0001) return 0;
-  if (state.includes('overpaid') || state.includes('nadp')) return Math.abs(saldo);
-  if (state.includes('paid') || state.includes('settled') || state.includes('closed') || state.includes('rozlic')) return 0;
-  return saldo < 0 ? saldo : -saldo;
+  const state = paymentStatusSymbol(row);
+  if (hasSaldo) {
+    if (Math.abs(saldo) <= 0.0001) return 0;
+    if (state.includes('overpaid') || state.includes('nadp')) return Math.abs(saldo);
+    if (isPaymentPaid(row)) return 0;
+    return saldo < 0 ? saldo : -saldo;
+  }
+
+  const amount = parseFlexibleNumber(firstNonEmpty(row?.amount, row?.total_amount));
+  if (isPaymentPaid(row)) return 0;
+  return amount > 0 ? -amount : 0;
 }
 
 export function mapFinanceRecords(payments) {
   return asArray(payments).map((row) => {
     const currency = firstNonEmpty(row?.currency, 'PLN');
-    const amountValue = parseFlexibleNumber(row?.total_amount || row?.amount || row?.saldo_amount);
+    const hasAndroidAmount = Boolean(firstNonEmpty(row?.amount));
+    const amountValue = parseFlexibleNumber(firstNonEmpty(row?.total_amount, row?.amount, row?.saldo_amount));
     const balanceValue = normalizePaymentBalance(row);
-    const paidValue = balanceValue < 0 ? Math.max(0, amountValue - Math.abs(balanceValue)) : amountValue;
-    const title = localizedField(row, 'description') || firstNonEmpty(row?.type, row?.debt_type, row?.id, 'Pozycja finansowa');
+    const paidValue = hasAndroidAmount
+      ? (isPaymentPaid(row) ? amountValue : 0)
+      : (balanceValue < 0 ? Math.max(0, amountValue - Math.abs(balanceValue)) : amountValue);
+    const title = localizedField(row, 'description')
+      || localizedField(row, 'name')
+      || localizedField(row, 'title')
+      || firstNonEmpty(row?.type, row?.debt_type, row?.id, 'Pozycja finansowa');
 
     return {
       title,
       amountText: amountValue ? moneyText(amountValue, currency) : null,
       paidText: paidValue ? moneyText(paidValue, currency) : null,
-      dueDateText: firstNonEmpty(row?.payment_deadline) || null,
-      paidDateText: null,
+      dueDateText: firstNonEmpty(row?.payment_deadline, row?.due_date) || null,
+      paidDateText: firstNonEmpty(row?.paid_date) || null,
       balanceText: moneyText(balanceValue, currency),
       accountText: firstNonEmpty(row?.account_number) || null,
       amountValue,

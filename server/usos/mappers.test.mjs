@@ -63,7 +63,7 @@ test('sorts semesters chronologically with newest last', () => {
   assert.equal(semesters.at(-1)?.status, 'Aktywny');
 });
 
-test('maps grades and keeps missing activity grades visible', () => {
+test('maps grades and ignores empty activity grades', () => {
   const grades = mapGrades({
     termId: '2024Z',
     coursesResponse: {
@@ -101,13 +101,10 @@ test('maps grades and keeps missing activity grades visible', () => {
     },
   });
 
-  assert.equal(grades.length, 3);
-  assert.deepEqual(grades.map((grade) => grade.subjectName), ['Algebra', 'Algebra', 'Algebra']);
+  assert.equal(grades.length, 2);
+  assert.deepEqual(grades.map((grade) => grade.subjectName), ['Algebra', 'Algebra']);
   assert.equal(grades[0].type, 'Ocena końcowa');
   assert.equal(grades[1].type, 'Zaliczenie');
-  assert.equal(grades[2].grade, '');
-  assert.equal(grades[2].type, 'Ćwiczenia');
-  assert.equal(grades[2].weight, 5);
 });
 
 test('maps course-user grade fallback when terms2 has no grade rows', () => {
@@ -134,7 +131,7 @@ test('maps course-user grade fallback when terms2 has no grade rows', () => {
   assert.equal(grades[0].type, 'Ocena końcowa');
 });
 
-test('maps account-level grades with activity labels and missing grade placeholders', () => {
+test('maps account-level grades with activity labels only for real grades', () => {
   const grades = mapGrades({
     coursesResponse: {
       terms: [{ id: '2025L' }],
@@ -167,11 +164,9 @@ test('maps account-level grades with activity labels and missing grade placehold
     },
   });
 
-  assert.equal(grades.length, 3);
-  assert.deepEqual(grades.map((grade) => grade.type).sort((a, b) => a.localeCompare(b, 'pl')), ['Ćwiczenia', 'Laboratorium', 'Wykład']);
-  assert.equal(grades.find((grade) => grade.type === 'Ćwiczenia')?.grade, '3.5');
-  assert.equal(grades.find((grade) => grade.type === 'Laboratorium')?.grade, '');
-  assert.equal(grades.find((grade) => grade.type === 'Wykład')?.grade, '');
+  assert.equal(grades.length, 1);
+  assert.equal(grades[0].type, 'Ćwiczenia');
+  assert.equal(grades[0].grade, '3.5');
 });
 
 test('keeps account-level grades scoped to selected terms', () => {
@@ -232,6 +227,34 @@ test('normalizes finance balance signs', () => {
   assert.equal(records[0].balanceValue, -250);
   assert.equal(records[1].balanceValue, 20);
   assert.equal(records[2].balanceValue, 0);
+});
+
+test('maps Android-style user payment records', () => {
+  const records = mapFinanceRecords([
+    {
+      id: '1',
+      name: { pl: 'Opłata semestralna' },
+      amount: '125.50',
+      due_date: '2026-07-15',
+      status: 'unpaid',
+      is_paid: false,
+    },
+    {
+      id: '2',
+      title: 'Rozliczone',
+      amount: '50',
+      status: 'paid',
+      is_paid: true,
+    },
+  ]);
+
+  assert.equal(records[0].title, 'Opłata semestralna');
+  assert.equal(records[0].dueDateText, '2026-07-15');
+  assert.equal(records[0].amountValue, 125.5);
+  assert.equal(records[0].paidValue, 0);
+  assert.equal(records[0].balanceValue, -125.5);
+  assert.equal(records[1].paidValue, 50);
+  assert.equal(records[1].balanceValue, 0);
 });
 
 test('keeps fallback student details visible without programme data', () => {

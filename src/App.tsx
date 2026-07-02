@@ -143,6 +143,15 @@ function normalizeStatsAlbum(value: unknown): string {
   return match?.[1] ?? '';
 }
 
+function formatCreditMetric(value: number | null | undefined, fallback: number): string {
+  const source = typeof value === 'number' && Number.isFinite(value) ? value : fallback;
+  if (!Number.isFinite(source)) return '0';
+  return new Intl.NumberFormat('pl-PL', {
+    minimumFractionDigits: Math.abs(source - Math.round(source)) > 0.0001 ? 1 : 0,
+    maximumFractionDigits: 1,
+  }).format(Math.max(0, source));
+}
+
 function getPositiveViewportNumbers(values: Array<number | undefined>): number[] {
   return values.filter((value): value is number => typeof value === 'number' && Number.isFinite(value) && value > 0);
 }
@@ -400,7 +409,6 @@ function App() {
   const [statsError, setStatsError] = useState('');
 
   const activeStudyId = session?.activeStudyId ?? studies[0]?.przynaleznoscId ?? null;
-  const hasMultipleUsosProgrammes = studies.length > 1;
   const canOpenStats = useMemo(() => normalizeStatsAlbum(session?.userId) === STATS_OWNER_ALBUM, [session?.userId]);
   const sessionScopes = useMemo(() => session?.usos?.scopes ?? [], [session?.usos?.scopes]);
   const effectiveSurveysMissingScopes = useMemo(() => {
@@ -1195,28 +1203,53 @@ function App() {
 
     if (!(await ensureSessionStillValid(session))) return;
 
-    const gradesCacheKey = `${session.userId || 'usos'}_active_terms_v3`;
+    const gradesCacheKey = `${session.userId || 'usos'}_active_terms_v4`;
+    let hasCachedGrades = false;
     if (!forceRefresh) {
       const cached = cache.loadGradesForce(gradesCacheKey);
-      if (cached) setGrades(cached);
-      if (cache.loadGrades(gradesCacheKey)) return;
+      if (cached) {
+        hasCachedGrades = cached.length > 0;
+        setGrades(cached);
+      }
+      if (cache.loadGrades(gradesCacheKey)) {
+        if (!credits) {
+          void fetchCreditSummary(session, activeStudyId).then((summary) => {
+            if (summary) setCredits(summary);
+          }).catch(() => undefined);
+        }
+        return;
+      }
     }
 
     setGradesLoad(true);
     setGlobalError('');
     try {
-      const fresh = await fetchCombinedGrades(session);
+      const [gradesResult, creditsResult] = await Promise.allSettled([
+        fetchCombinedGrades(session),
+        fetchCreditSummary(session, activeStudyId),
+      ]);
+
+      if (creditsResult.status === 'fulfilled' && creditsResult.value) {
+        setCredits(creditsResult.value);
+      }
+      if (gradesResult.status === 'rejected') {
+        throw gradesResult.reason;
+      }
+
+      const fresh = gradesResult.value;
       cache.saveGrades(gradesCacheKey, fresh);
       setGrades(fresh);
     } catch (e) {
       if (handleSessionError(e)) return;
-      if (!grades.length) {
+      if (!hasCachedGrades && !grades.length) {
         showGlobalError(e, 'Nie można pobrać ocen.');
+      } else {
+        showToast('USOS jest chwilowo niedostępny, pokazuję zapisane oceny.');
       }
     } finally {
       setGradesLoad(false);
     }
-  }, [session, grades.length, ensureSessionStillValid, handleSessionError, showGlobalError]);
+  }, [session, activeStudyId, credits, grades.length, ensureSessionStillValid, handleSessionError, showGlobalError, showToast]);
 
   const loadFinanceData = useCallback(async (forceRefresh = false) => {
     if (!session || !activeStudyId) {
@@ -1493,10 +1526,13 @@ function App() {
     }
 
     const avg = sumWeights > 0 ? fmtDec(sumWeighted / sumWeights, 2) : '-';
-    const ects = Math.round(Math.max(0, sumUniqueEcts(visibleGrades)));
-    const count = visibleGrades.filter((g) => g.grade.trim()).length;
-    return { avg, ects: String(ects), count: String(count) };
-  }, [visibleGrades]);
+    const fallbackEcts = Math.max(0, sumUniqueEcts(visibleGrades));
+    return {
+      avg,
+      ectsSem: formatCreditMetric(credits?.programmeUsed, fallbackEcts),
+      ectsTotal: formatCreditMetric(credits?.overallUsed, fallbackEcts),
+    };
+  }, [credits, visibleGrades]);
 
   const links = useMemo(() => sortUsefulLinks(studies), [studies]);
 
@@ -2383,8 +2419,8 @@ function App() {
         financeRecords={financeSnapshot.records}
         financeLoading={financeLoading}
         financeFetchedAt={financeSnapshot.fetchedAt}
+        onRefresh={() => void loadFinanceData(true)}
         onToast={showToast}
-        hasProgrammeSplitNotice={hasMultipleUsosProgrammes}
       />
     );
   }

@@ -32,9 +32,6 @@ function GradesLoadingSkeleton() {
           </div>
         </div>
 
-        <div className="grades-filters-container skeleton-panel">
-          <Skeleton className="skeleton-line skeleton-line-xs" style={{ width: '72%' }} />
-        </div>
       </div>
 
       <div className="grades-surface">
@@ -379,7 +376,7 @@ function InfoMainLoadingSkeleton() {
 
 interface GradesScreenProps {
   t: TranslateFn;
-  gradesSummary: { avg: string; ects: string; count: string };
+  gradesSummary: { avg: string; ectsSem: string; ectsTotal: string };
   gradesLoading: boolean;
   grades: Grade[];
   settings: AppSettings;
@@ -405,9 +402,6 @@ export function GradesScreen({
   const gradeTypeText = (grade: Grade) => (
     isFinalGradeType(grade.type, grade.subjectName) ? t('grades.finalGrade') : (grade.type || t('grades.component'))
   );
-  const shouldShowMissingGrade = (grade: Grade) => (
-    !grade.grade.trim() && ['Ćwiczenia', 'Laboratorium', 'Wykład'].includes(grade.type)
-  );
 
   return (
     <section className="screen grades-screen">
@@ -419,8 +413,8 @@ export function GradesScreen({
             <div className="grades-hero">
               <div className="metrics-row">
                 <div className="metric-card"><div className="metric-label">{t('grades.avg')}</div><div className="metric-value">{gradesSummary.avg}</div></div>
-                <div className="metric-card"><div className="metric-label">{t('grades.ects')}</div><div className="metric-value">{gradesSummary.ects}</div></div>
-                <div className="metric-card"><div className="metric-label">{t('grades.count')}</div><div className="metric-value">{gradesSummary.count}</div></div>
+                <div className="metric-card"><div className="metric-label">{t('grades.ectsSem')}</div><div className="metric-value">{gradesSummary.ectsSem}</div></div>
+                <div className="metric-card"><div className="metric-label">{t('grades.ectsTotal')}</div><div className="metric-value">{gradesSummary.ectsTotal}</div></div>
               </div>
             </div>
           </div>
@@ -490,7 +484,6 @@ export function GradesScreen({
                               <span className={`grade-pill ${gradeTone(g.grade)}`}>{g.grade.trim() || '–'}</span>
                               <div className="grade-info">
                                 <div className="grade-type-chip">{gradeTypeText(g)}</div>
-                                {shouldShowMissingGrade(g) && <div className="grade-date-teacher grade-missing-note">{t('grades.missingGrade')}</div>}
                                 {g.date && <div className="grade-date-teacher">{g.date}</div>}
                                 {g.teacher && <div className="grade-date-teacher grade-date-teacher-secondary">{g.teacher}</div>}
                               </div>
@@ -511,7 +504,6 @@ export function GradesScreen({
                       </div>
                       <div className="grade-flat-meta">
                         <div className="grade-type-chip">{gradeTypeText(g)}</div>
-                        {shouldShowMissingGrade(g) && <div className="grade-date-teacher grade-missing-note">{t('grades.missingGrade')}</div>}
                         {(g.date || g.teacher) && (
                           <div className="grade-date-teacher">
                             {g.date || '–'}{g.teacher ? ` · ${g.teacher}` : ''}
@@ -539,8 +531,8 @@ interface FinanceScreenProps {
   financeRecords: FinanceRecord[];
   financeLoading: boolean;
   financeFetchedAt: number;
+  onRefresh: () => void;
   onToast: (message: string) => void;
-  hasProgrammeSplitNotice?: boolean;
 }
 
 export function FinanceScreen({
@@ -551,8 +543,8 @@ export function FinanceScreen({
   financeRecords,
   financeLoading,
   financeFetchedAt,
+  onRefresh,
   onToast,
-  hasProgrammeSplitNotice = false,
 }: FinanceScreenProps) {
   const [filter, setFilter] = useState<FinanceFilterKey>('all');
   const [noticeOpen, setNoticeOpen] = useState(false);
@@ -629,7 +621,22 @@ export function FinanceScreen({
         <>
           <div className="finance-header-wrapper">
             <div className="finance-hero">
-              <div className="finance-hero-subtitle">{t('finance.subtitle')}</div>
+              <div className="finance-hero-head">
+                <div className="finance-hero-copy">
+                  <div className="finance-eyebrow">{t('screen.finance')}</div>
+                  <div className="finance-hero-title">{t('finance.title')}</div>
+                  <div className="finance-hero-subtitle">{t('finance.subtitle')}</div>
+                </div>
+                <button
+                  type="button"
+                  className="finance-refresh-btn"
+                  onClick={onRefresh}
+                  disabled={financeLoading}
+                  aria-label={t('finance.refresh')}
+                >
+                  <Ic n="refresh" />
+                </button>
+              </div>
 
               <div className="metrics-row finance-summary-grid">
                 <div className="metric-card">
@@ -682,9 +689,6 @@ export function FinanceScreen({
                   </button>
                 ))}
               </div>
-              {hasProgrammeSplitNotice && (
-                <div className="usos-scope-note">{t('usos.programmeSplitNotice')}</div>
-              )}
             </div>
           </div>
 

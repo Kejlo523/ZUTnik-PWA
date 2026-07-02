@@ -18,7 +18,13 @@ import type {
   UsosSessionData,
   ViewMode,
 } from '../types';
-import { getPlanEventFilterKey, getPlanEventFilterLabel } from '../planFilters';
+import {
+  getPlanEventFilterKey,
+  getPlanEventFilterLabel,
+  getPlanEventFilterTypeKey,
+  getPlanEventSubjectLabel,
+  normalizePlanFilterKey,
+} from '../planFilters';
 import { loadOrCreateDeviceId } from './storage';
 
 const API_BASE = import.meta.env.VITE_API_BASE ?? (import.meta.env.DEV ? '/api' : `${import.meta.env.BASE_URL}api`);
@@ -319,7 +325,7 @@ function normalizePlanHiddenSubjectKeys(value: unknown): string[] {
   return [...new Set(
     value
       .filter((item): item is string => typeof item === 'string')
-      .map((item) => item.trim())
+      .map((item) => normalizePlanFilterKey(item))
       .filter(Boolean),
   )];
 }
@@ -904,18 +910,31 @@ function buildPlanDayColumns(
 }
 
 function buildPlanSubjectFilters(dayColumns: PlanResult['dayColumns']): PlanResult['subjectFilters'] {
-  const subjectFilterMap = new Map<string, { key: string; label: string; count: number }>();
+  const subjectFilterMap = new Map<string, PlanResult['subjectFilters'][number]>();
 
   for (const column of dayColumns) {
     for (const event of column.events) {
+      const typeKey = getPlanEventFilterTypeKey(event);
+      if (!typeKey) continue;
+
       const key = getPlanEventFilterKey(event);
       if (!key) continue;
+
+      const subjectLabel = getPlanEventSubjectLabel(event);
+      const typeLabel = event.typeLabel || '';
       const label = getPlanEventFilterLabel(event);
       const existing = subjectFilterMap.get(key);
       if (existing) {
         existing.count += 1;
       } else {
-        subjectFilterMap.set(key, { key, label, count: 1 });
+        subjectFilterMap.set(key, {
+          key,
+          label,
+          subjectLabel,
+          typeKey,
+          typeLabel,
+          count: 1,
+        });
       }
     }
   }

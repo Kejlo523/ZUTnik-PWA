@@ -1,4 +1,5 @@
-import type { Grade, SessionData, ViewMode } from '../types';
+import type { Grade, PlanSubjectFilter, SessionData, ViewMode } from '../types';
+import { extractPlanFilterTypeKey, normalizePlanFilterString } from '../planFilters';
 
 export function todayYmd(): string {
   const d = new Date();
@@ -122,6 +123,99 @@ export function isFinalGradeType(type: string, subjectName?: string): boolean {
     );
   }
   return false;
+}
+
+export function cleanGradeText(value: string | undefined): string {
+  const text = String(value || '').trim();
+  const lower = text.toLowerCase();
+  if (lower === 'null' || lower === 'undefined') return '';
+  return text;
+}
+
+export function extractGradeBaseSubject(value: string | undefined): string {
+  const text = cleanGradeText(value);
+  if (!text.endsWith(')')) return text;
+
+  const open = text.lastIndexOf('(');
+  if (open <= 0) return text;
+
+  return text.slice(0, open).trim();
+}
+
+export function extractGradeTypeFromSubject(value: string | undefined): string {
+  const text = cleanGradeText(value);
+  if (!text.endsWith(')')) return '';
+
+  const open = text.lastIndexOf('(');
+  if (open < 0 || open >= text.length - 2) return '';
+
+  return text.slice(open + 1, -1).trim();
+}
+
+function resolveGradeTypeFromCourseId(courseId: string | undefined): string | null {
+  const match = cleanGradeText(courseId).match(/-([A-Z]{2})$/i);
+  if (!match) return null;
+
+  switch (match[1].toUpperCase()) {
+    case 'WK':
+      return 'lec';
+    case 'CW':
+      return 'aud';
+    case 'LB':
+      return 'lab';
+    case 'LE':
+    case 'LK':
+      return 'lek';
+    default:
+      return null;
+  }
+}
+
+function isGenericGradeTypeLabel(type: string): boolean {
+  return type.includes('koncowa')
+    || type.includes('final')
+    || type.includes('zaliczen')
+    || type.includes('egzamin')
+    || type.includes('exam');
+}
+
+export function resolveGradeTypeKey(grade: Grade): string | null {
+  const fromCourseId = resolveGradeTypeFromCourseId(grade.courseId);
+  if (fromCourseId) return fromCourseId;
+
+  let type = normalizePlanFilterString(grade.type);
+  if (!type) {
+    type = normalizePlanFilterString(extractGradeTypeFromSubject(grade.subjectName));
+  }
+  if (!type || isGenericGradeTypeLabel(type)) return null;
+
+  if (type === 'l' || type.includes('lab')) return 'lab';
+  if (type === 'a' || type.includes('aud')) return 'aud';
+  if (type === 'w' || type.includes('wyk') || type.includes('lec')) return 'lec';
+  if (type.includes('laboratorium') || type.includes('laboratory')) return 'lab';
+  if (type.includes('audytoryjne') || type.includes('auditory') || type.includes('auditorium')) return 'aud';
+  if (type.includes('wyklad') || type.includes('lecture')) return 'lec';
+  if (type.includes('lektorat') || type.includes('lectorate') || type.includes('language course') || type.includes('angiels')) return 'lek';
+  if (type.includes('cwiczen')) return 'aud';
+  return null;
+}
+
+export function planSubjectFilterSubject(item: PlanSubjectFilter): string {
+  return cleanGradeText(item.subjectLabel)
+    || extractGradeBaseSubject(item.label)
+    || cleanGradeText(item.label);
+}
+
+export function gradeMatchesHiddenPlanFilter(grade: Grade, item: PlanSubjectFilter): boolean {
+  const gradeSubject = extractGradeBaseSubject(grade.subjectName) || cleanGradeText(grade.subjectName);
+  const filterSubject = planSubjectFilterSubject(item);
+  if (!normalizePlanFilterString(gradeSubject) || normalizePlanFilterString(gradeSubject) !== normalizePlanFilterString(filterSubject)) {
+    return false;
+  }
+
+  const gradeTypeKey = resolveGradeTypeKey(grade);
+  const filterTypeKey = cleanGradeText(item.typeKey) || extractPlanFilterTypeKey(item.key);
+  return !gradeTypeKey || !filterTypeKey || gradeTypeKey === filterTypeKey;
 }
 
 export function getSessionSignature(session: SessionData | null): string {

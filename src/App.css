@@ -2916,6 +2916,14 @@ button.outline {
   background: var(--mz-card-soft);
 }
 
+.grade-group-head.no-expand {
+  cursor: default;
+}
+
+.grade-group-head.no-expand:active {
+  background: transparent;
+}
+
 .grade-group-icon {
   width: 34px;
   height: 34px;

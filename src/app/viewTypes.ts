@@ -16,6 +16,7 @@ export interface GroupedGradeView {
   items: Grade[];
   finalGrade: string;
   ects: number;
+  emptyFromPlanFilter?: boolean;
 }
 
 export type DrawerScreenKey = Exclude<ScreenKey, 'login' | 'news-detail'>;

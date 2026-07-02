@@ -402,6 +402,7 @@ export function GradesScreen({
   const gradeTypeText = (grade: Grade) => (
     isFinalGradeType(grade.type, grade.subjectName) ? t('grades.finalGrade') : (grade.type || t('grades.component'))
   );
+  const hasVisibleGradeContent = settings.gradesGrouping ? groupedGrades.length > 0 : grades.length > 0;
 
   return (
     <section className="screen grades-screen">
@@ -420,26 +421,30 @@ export function GradesScreen({
           </div>
 
           <div className="grades-surface">
-            {!gradesLoading && grades.length === 0 && (
+            {!gradesLoading && !hasVisibleGradeContent && (
               <div className="empty-state"><div className="empty-state-icon">🎓</div><p>{t('grades.noGrades')}</p></div>
             )}
 
             <div className="list-stack">
               {settings.gradesGrouping ? (
-                groupedGrades.map(({ subject, items, finalGrade, ects }) => {
+                groupedGrades.map(({ subject, items, finalGrade, ects, emptyFromPlanFilter }) => {
                   const isOpen = !!expandedGradeSubjects[subject];
-                  const detailItems = items.filter((g) => !isFinalGradeType(g.type, g.subjectName));
-                  const visibleItems = detailItems.length > 0 ? detailItems : items;
+                  const visibleItems = items;
+                  const canExpand = visibleItems.length > 0;
                   const previewItems = visibleItems.slice(0, 3);
                   const previewOverflow = Math.max(0, visibleItems.length - previewItems.length);
                   const hasFinalGrade = !!finalGrade.trim();
                   return (
-                    <div key={subject} className={`grade-group${isOpen ? ' is-open' : ''}`}>
+                    <div key={subject} className={`grade-group${isOpen ? ' is-open' : ''}${emptyFromPlanFilter ? ' is-empty-from-plan' : ''}`}>
                       <button
                         type="button"
-                        className="grade-group-head"
-                        onClick={() => setExpandedGradeSubjects((prev) => ({ ...prev, [subject]: !prev[subject] }))}
-                        aria-expanded={isOpen}
+                        className={`grade-group-head${!canExpand ? ' no-expand' : ''}`}
+                        onClick={() => {
+                          if (!canExpand) return;
+                          setExpandedGradeSubjects((prev) => ({ ...prev, [subject]: !prev[subject] }));
+                        }}
+                        aria-expanded={canExpand ? isOpen : false}
+                        aria-disabled={!canExpand}
                       >
                         <div className="grade-group-head-main">
                           <div className="grade-group-icon"><Ic n="grade" /></div>
@@ -448,7 +453,14 @@ export function GradesScreen({
                           </div>
                         </div>
                         <div className="grade-group-side">
-                          {(hasFinalGrade || ects > 0) && (
+                          {emptyFromPlanFilter ? (
+                            <div className="grade-group-summary">
+                              <div className="grade-group-pill neutral">-</div>
+                              <div className="grade-group-summary-copy">
+                                <span>{t('grades.noGradesShort')}</span>
+                              </div>
+                            </div>
+                          ) : (hasFinalGrade || ects > 0) && (
                             <div className="grade-group-summary">
                               {hasFinalGrade && <div className={`grade-group-pill ${gradeTone(finalGrade)}`}>{gradeText(finalGrade)}</div>}
                               <div className="grade-group-summary-copy">
@@ -457,11 +469,11 @@ export function GradesScreen({
                               </div>
                             </div>
                           )}
-                          <div className={`grade-group-chevron ${isOpen ? 'open' : ''}`}><Ic n="chevR" /></div>
+                          {canExpand && <div className={`grade-group-chevron ${isOpen ? 'open' : ''}`}><Ic n="chevR" /></div>}
                         </div>
                       </button>
 
-                      {!isOpen && visibleItems.length > 0 && (
+                      {!isOpen && canExpand && (
                         <div className="grade-group-preview">
                           {previewItems.map((g, i) => (
                             <span
@@ -477,20 +489,22 @@ export function GradesScreen({
                         </div>
                       )}
 
-                      <div className={`grade-group-items-wrap ${isOpen ? 'open' : ''}`} aria-hidden={!isOpen}>
-                        <div className="grade-group-items">
-                          {visibleItems.map((g, i) => (
-                            <div key={`${subject}-${i}`} className="grade-row">
-                              <span className={`grade-pill ${gradeTone(g.grade)}`}>{g.grade.trim() || '–'}</span>
-                              <div className="grade-info">
-                                <div className="grade-type-chip">{gradeTypeText(g)}</div>
-                                {g.date && <div className="grade-date-teacher">{g.date}</div>}
-                                {g.teacher && <div className="grade-date-teacher grade-date-teacher-secondary">{g.teacher}</div>}
+                      {canExpand && (
+                        <div className={`grade-group-items-wrap ${isOpen ? 'open' : ''}`} aria-hidden={!isOpen}>
+                          <div className="grade-group-items">
+                            {visibleItems.map((g, i) => (
+                              <div key={`${subject}-${i}`} className="grade-row">
+                                <span className={`grade-pill ${gradeTone(g.grade)}`}>{g.grade.trim() || '–'}</span>
+                                <div className="grade-info">
+                                  <div className="grade-type-chip">{gradeTypeText(g)}</div>
+                                  {g.date && <div className="grade-date-teacher">{g.date}</div>}
+                                  {g.teacher && <div className="grade-date-teacher grade-date-teacher-secondary">{g.teacher}</div>}
+                                </div>
                               </div>
-                            </div>
-                          ))}
+                            ))}
+                          </div>
                         </div>
-                      </div>
+                      )}
                     </div>
                   );
                 })

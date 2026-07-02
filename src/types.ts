@@ -256,6 +256,9 @@ export interface PlanMonthCell {
 export interface PlanSubjectFilter {
   key: string;
   label: string;
+  subjectLabel?: string;
+  typeKey?: string;
+  typeLabel?: string;
   count: number;
 }
 

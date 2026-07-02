@@ -91,12 +91,44 @@ function normalizeAlbumKey(value) {
   return /^[a-zA-Z0-9_-]{3,32}$/.test(album) ? album : '';
 }
 
+function normalizePlanFilterTypeKey(value) {
+  const normalized = String(value || '')
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/ł/g, 'l')
+    .replace(/đ/g, 'd');
+
+  if (!normalized) return '';
+  if (normalized === 'lec' || normalized === 'lecture' || normalized.endsWith('-lecture')) return 'lec';
+  if (normalized === 'aud' || normalized === 'cw' || normalized === 'auditory' || normalized.endsWith('-auditory')) return 'aud';
+  if (normalized === 'lab' || normalized.endsWith('-lab')) return 'lab';
+  if (normalized === 'le' || normalized === 'lek' || normalized === 'lk' || normalized === 'lectorate' || normalized.endsWith('-lectorate')) return 'lek';
+  return '';
+}
+
+function normalizePlanFilterKey(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+
+  const separator = raw.lastIndexOf('||');
+  if (separator < 0 || separator >= raw.length - 2) return raw;
+
+  const subject = raw.slice(0, separator).trim();
+  const suffix = raw.slice(separator + 2).trim();
+  if (!subject || !suffix) return raw;
+
+  const mappedType = normalizePlanFilterTypeKey(suffix);
+  return `${subject}||${mappedType || suffix}`;
+}
+
 function normalizePlanHiddenSubjectKeys(value) {
   if (!Array.isArray(value)) return [];
   return [...new Set(
     value
       .filter((item) => typeof item === 'string')
-      .map((item) => item.trim())
+      .map((item) => normalizePlanFilterKey(item))
       .filter(Boolean),
   )];
 }

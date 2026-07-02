@@ -55,21 +55,31 @@ import { sortUsefulLinks } from './constants/usefulLinks';
 import { useAppNavigation, useExitAttemptToast } from './hooks/useAppNavigation';
 import { useSwipeGestures } from './hooks/useSwipeBack';
 import { createT } from './i18n';
-import { getPlanEventFilterKey, getPlanEventFilterLabel } from './planFilters';
+import {
+  getPlanEventFilterKey,
+  getPlanEventFilterLabel,
+  getPlanEventFilterTypeKey,
+  getPlanEventSubjectLabel,
+  normalizePlanFilterKey,
+  normalizePlanFilterString,
+} from './planFilters';
 import { exportPlanToIcs } from './app/planExport';
 import { relayoutDayEvents } from './app/planLayout';
 import { LOGO_SRC, MONTH_WEEKDAY_KEYS, SCREEN_I18N_KEY } from './app/constants';
 import {
   addDaysYmd,
+  extractGradeBaseSubject,
   fmtDateLabel,
   fmtDayMonth,
   fmtDec,
   fmtHour,
+  gradeMatchesHiddenPlanFilter,
   fmtWeekdayShort,
   getSessionSignature,
   isFinalGradeType,
   isWeekendDate,
   parseGradeNum,
+  planSubjectFilterSubject,
   planCacheKey,
   sumUniqueEcts,
   todayYmd,
@@ -114,7 +124,7 @@ function normalizePlanHiddenSubjectKeys(keys: string[]): string[] {
   return [...new Set(
     keys
       .filter((value): value is string => typeof value === 'string')
-      .map((value) => value.trim())
+      .map((value) => normalizePlanFilterKey(value))
       .filter(Boolean),
   )];
 }
@@ -153,7 +163,7 @@ function formatCreditMetric(value: number | null | undefined, fallback: number):
 }
 
 function keepRealGrades(items: Grade[]): Grade[] {
-  return items.filter((item) => item.grade?.trim());
+  return items.filter((item) => item.grade?.trim() || !isFinalGradeType(item.type, item.subjectName));
 }
 
 function getPositiveViewportNumbers(values: Array<number | undefined>): number[] {
@@ -383,10 +393,16 @@ function App() {
   // Grades
   const [grades, setGrades] = useState<Grade[]>([]);
   const [gradesLoading, setGradesLoad] = useState(false);
+  const [gradesPlanAlbum, setGradesPlanAlbum] = useState('');
+  const [gradesPlanSubjectFilters, setGradesPlanSubjectFilters] = useState<PlanResult['subjectFilters']>([]);
   const [expandedGradeSubjects, setExpandedGradeSubjects] = useState<Record<string, boolean>>({});
+  const gradesRef = useRef<Grade[]>([]);
+  const creditsRef = useRef<CreditSummary | null>(null);
   const planRequestIdRef = useRef<string>('');
   const planWindowCacheRef = useRef<Record<string, PlanWindowData>>({});
   const planWindowRequestsRef = useRef<Record<string, Promise<PlanWindowData>>>({});
+  const gradesPlanFilterRequestIdRef = useRef<string>('');
+  const gradesPlanFilterCacheRef = useRef<Record<string, { album: string; filters: PlanResult['subjectFilters'] }>>({});
 
   // Finance
   const [financeSnapshot, setFinanceSnapshot] = useState<FinanceSnapshot>(EMPTY_FINANCE_SNAPSHOT);
@@ -420,7 +436,7 @@ function App() {
     if (session && !sessionScopes.includes('surveys_filling')) missing.add('surveys_filling');
     return [...missing];
   }, [surveysMissingScopes, session, sessionScopes]);
-  const currentPlanAlbum = useMemo(() => (planResult?.debug.album || '').trim(), [planResult?.debug.album]);
+  const currentPlanAlbum = useMemo(() => (planResult?.debug.album || gradesPlanAlbum || '').trim(), [gradesPlanAlbum, planResult?.debug.album]);
   const hiddenPlanSubjectKeys = useMemo(() => (
     currentPlanAlbum ? (planHiddenSubjectKeysByAlbum[currentPlanAlbum] ?? []) : []
   ), [currentPlanAlbum, planHiddenSubjectKeysByAlbum]);
@@ -428,6 +444,14 @@ function App() {
   useEffect(() => {
     planHiddenSubjectKeysByAlbumRef.current = planHiddenSubjectKeysByAlbum;
   }, [planHiddenSubjectKeysByAlbum]);
+
+  useEffect(() => {
+    gradesRef.current = grades;
+  }, [grades]);
+
+  useEffect(() => {
+    creditsRef.current = credits;
+  }, [credits]);
 
   // ── Online/offline tracking ──────────────────────────────────────────────
   useEffect(() => {
@@ -1146,6 +1170,58 @@ function App() {
     }
   }, []);
 
+  const loadGradesPlanFilters = useCallback(async (forceRefresh = false) => {
+    if (!session) {
+      setGradesPlanAlbum('');
+      setGradesPlanSubjectFilters([]);
+      return;
+    }
+
+    const cacheKey = `${session.userId || 'usos'}_${activeStudyId ?? 'nostudy'}_${todayYmd()}`;
+    const cachedFiltersEntry = gradesPlanFilterCacheRef.current[cacheKey];
+    if (!forceRefresh && cachedFiltersEntry) {
+      setGradesPlanAlbum(cachedFiltersEntry.album);
+      setGradesPlanSubjectFilters(cachedFiltersEntry.filters);
+      if (cachedFiltersEntry.album) {
+        const hiddenKeys = await loadPersistedPlanHiddenSubjects(cachedFiltersEntry.album);
+        setPlanHiddenSubjectsForAlbum(cachedFiltersEntry.album, hiddenKeys);
+      }
+      return;
+    }
+
+    const requestId = Math.random().toString(36).slice(2, 11);
+    gradesPlanFilterRequestIdRef.current = requestId;
+
+    try {
+      const result = await fetchPlanSemesterExport(session, {
+        currentDate: todayYmd(),
+        studyId: activeStudyId,
+        search: { category: 'album', query: '' },
+      });
+
+      if (gradesPlanFilterRequestIdRef.current !== requestId) return;
+
+      const album = (result.debug.album || '').trim();
+      const filters = result.subjectFilters ?? [];
+      gradesPlanFilterCacheRef.current[cacheKey] = { album, filters };
+      setGradesPlanAlbum(album);
+      setGradesPlanSubjectFilters(filters);
+
+      if (album) {
+        const hiddenKeys = await loadPersistedPlanHiddenSubjects(album);
+        if (gradesPlanFilterRequestIdRef.current !== requestId) return;
+        setPlanHiddenSubjectsForAlbum(album, hiddenKeys);
+      }
+    } catch (error) {
+      console.warn('Failed to load plan filters for grades', error);
+    }
+  }, [
+    session,
+    activeStudyId,
+    loadPersistedPlanHiddenSubjects,
+    setPlanHiddenSubjectsForAlbum,
+  ]);
+
   const applyPlanSearch = useCallback((category: string, query: string) => {
     const resolvedCategory = category.trim();
     const resolvedQuery = query.trim();
@@ -1223,7 +1299,7 @@ function App() {
         const cleanedFreshCached = keepRealGrades(freshCached);
         cache.saveGrades(gradesCacheKey, cleanedFreshCached);
         setGrades(cleanedFreshCached);
-        if (!credits) {
+        if (!creditsRef.current) {
           void fetchCreditSummary(session, activeStudyId).then((summary) => {
             if (summary) setCredits(summary);
           }).catch(() => undefined);
@@ -1252,7 +1328,7 @@ function App() {
       setGrades(fresh);
     } catch (e) {
       if (handleSessionError(e)) return;
-      if (!hasCachedGrades && !grades.length) {
+      if (!hasCachedGrades && !gradesRef.current.length) {
         showGlobalError(e, 'Nie można pobrać ocen.');
       } else {
         showToast('USOS jest chwilowo niedostępny, pokazuję zapisane oceny.');
@@ -1260,7 +1336,7 @@ function App() {
     } finally {
       setGradesLoad(false);
     }
-  }, [session, activeStudyId, credits, grades.length, ensureSessionStillValid, handleSessionError, showGlobalError, showToast]);
+  }, [session, activeStudyId, ensureSessionStillValid, handleSessionError, showGlobalError, showToast]);
 
   const loadFinanceData = useCallback(async (forceRefresh = false) => {
     if (!session || !activeStudyId) {
@@ -1404,6 +1480,8 @@ function App() {
 
     prevStudyId.current = activeStudyId;
     setGrades([]);
+    setGradesPlanAlbum('');
+    setGradesPlanSubjectFilters([]);
     setFinanceSnapshot({ ...EMPTY_FINANCE_SNAPSHOT });
     setDetails(null);
     setHistory([]);
@@ -1416,10 +1494,13 @@ function App() {
     setSelectedPlanEvent(null);
 
     if (screen === 'plan') void loadPlanData();
-    if (screen === 'grades') void loadGradesData(true);
+    if (screen === 'grades') {
+      void loadGradesData(true);
+      void loadGradesPlanFilters(true);
+    }
     if (screen === 'finance') void loadFinanceData();
     if (screen === 'info') void loadInfoData();
-  }, [session, activeStudyId, screen, loadPlanData, loadGradesData, loadFinanceData, loadInfoData]);
+  }, [session, activeStudyId, screen, loadPlanData, loadGradesData, loadGradesPlanFilters, loadFinanceData, loadInfoData]);
 
   // ── Refresh when plan date/view changes ──────────────────────────────────
   useEffect(() => {
@@ -1428,53 +1509,94 @@ function App() {
 
   // ── Computed values ───────────────────────────────────────────────────────
 
+  const hiddenGradePlanFilterItems = useMemo(() => {
+    if (!hiddenPlanSubjectKeys.length || !gradesPlanSubjectFilters.length) return [];
+    const hiddenKeys = new Set(hiddenPlanSubjectKeys);
+    return gradesPlanSubjectFilters.filter((item) => hiddenKeys.has(item.key));
+  }, [gradesPlanSubjectFilters, hiddenPlanSubjectKeys]);
+
   const visibleGrades = useMemo(() => {
-    const bySubject = new Map<string, Grade[]>();
-    for (const g of grades) {
-      const subject = (g.subjectName || 'Przedmiot').trim();
-      bySubject.set(subject, [...(bySubject.get(subject) ?? []), g]);
-    }
+    if (!grades.length) return [];
 
-    const subjectsWithGrade = new Set(
-      [...bySubject.entries()]
-        .filter(([, items]) => items.some((item) => item.grade.trim()))
-        .map(([subject]) => subject),
-    );
+    return grades.filter((grade) => {
+      if (!grade.grade.trim() && isFinalGradeType(grade.type, grade.subjectName)) {
+        return false;
+      }
 
-    return grades.filter((g) => subjectsWithGrade.has((g.subjectName || 'Przedmiot').trim()));
-  }, [grades]);
+      return !hiddenGradePlanFilterItems.some((item) => gradeMatchesHiddenPlanFilter(grade, item));
+    });
+  }, [grades, hiddenGradePlanFilterItems]);
 
   const groupedGrades = useMemo(() => {
-    const bySubject = new Map<string, Grade[]>();
+    const grouped = new Map<string, { subject: string; finalGradeItem: Grade | null; others: Grade[]; emptyFromPlanFilter: boolean }>();
+
     for (const g of visibleGrades) {
-      const subject = (g.subjectName || 'Przedmiot').trim();
-      bySubject.set(subject, [...(bySubject.get(subject) ?? []), g]);
+      const subject = extractGradeBaseSubject(g.subjectName);
+      if (!subject) continue;
+
+      let group = grouped.get(subject);
+      if (!group) {
+        group = { subject, finalGradeItem: null, others: [], emptyFromPlanFilter: false };
+        grouped.set(subject, group);
+      }
+
+      if (isFinalGradeType(g.type, g.subjectName)) {
+        if (!group.finalGradeItem) {
+          group.finalGradeItem = g;
+        } else {
+          group.others.push(g);
+        }
+      } else {
+        group.others.push(g);
+      }
     }
 
-    return [...bySubject.entries()]
-      .map(([subject, rawItems]) => {
-        const items = [...rawItems].sort((a, b) => {
+    const existingSubjects = new Set(
+      [...grouped.keys()]
+        .map((subject) => normalizePlanFilterString(subject))
+        .filter(Boolean),
+    );
+    const hiddenKeys = new Set(hiddenPlanSubjectKeys);
+
+    for (const item of gradesPlanSubjectFilters) {
+      if (!item.key || hiddenKeys.has(item.key)) continue;
+
+      const subject = planSubjectFilterSubject(item);
+      const normalizedSubject = normalizePlanFilterString(subject);
+      if (!normalizedSubject || existingSubjects.has(normalizedSubject)) continue;
+
+      grouped.set(subject, {
+        subject,
+        finalGradeItem: null,
+        others: [],
+        emptyFromPlanFilter: true,
+      });
+      existingSubjects.add(normalizedSubject);
+    }
+
+    return [...grouped.values()]
+      .map((group) => {
+        const items = [...group.others].sort((a, b) => {
           const aOrder = isFinalGradeType(a.type, a.subjectName) ? 0 : 1;
           const bOrder = isFinalGradeType(b.type, b.subjectName) ? 0 : 1;
           if (aOrder !== bOrder) return aOrder - bOrder;
           return (a.type || '').localeCompare(b.type || '', 'pl');
         });
 
-        const finalItem = items.find(item => isFinalGradeType(item.type, item.subjectName) && item.grade.trim())
-          ?? items.find(item => item.grade.trim())
-          ?? items[0];
-        const finalGrade = finalItem?.grade?.trim() ? finalItem.grade : '';
-
-        const ects = items.reduce((max, item) => (item.weight > max ? item.weight : max), 0);
+        const finalGrade = group.finalGradeItem?.grade?.trim() ? group.finalGradeItem.grade : '';
+        const allItems = group.finalGradeItem ? [group.finalGradeItem, ...items] : items;
+        const ects = allItems.reduce((max, item) => (item.weight > max ? item.weight : max), 0);
         return {
-          subject,
+          subject: group.subject,
           items,
           finalGrade,
           ects,
+          emptyFromPlanFilter: group.emptyFromPlanFilter,
         };
       })
+      .filter((group) => group.items.length > 0 || group.finalGrade.trim() || group.emptyFromPlanFilter)
       .sort((a, b) => a.subject.localeCompare(b.subject, 'pl'));
-  }, [visibleGrades]);
+  }, [gradesPlanSubjectFilters, hiddenPlanSubjectKeys, visibleGrades]);
 
   useEffect(() => {
     setExpandedGradeSubjects(prev => {
@@ -1552,16 +1674,28 @@ function App() {
       return planResult.subjectFilters;
     }
 
-    const filterMap = new Map<string, { key: string; label: string; count: number }>();
+    const filterMap = new Map<string, PlanResult['subjectFilters'][number]>();
     for (const col of planResult?.dayColumns ?? []) {
       for (const ev of col.events) {
+        const typeKey = getPlanEventFilterTypeKey(ev);
+        if (!typeKey) continue;
+
         const key = getPlanEventFilterKey(ev);
         if (!key) continue;
+        const subjectLabel = getPlanEventSubjectLabel(ev);
+        const typeLabel = ev.typeLabel || '';
         const existing = filterMap.get(key);
         if (existing) {
           existing.count += 1;
         } else {
-          filterMap.set(key, { key, label: getPlanEventFilterLabel(ev), count: 1 });
+          filterMap.set(key, {
+            key,
+            label: getPlanEventFilterLabel(ev),
+            subjectLabel,
+            typeKey,
+            typeLabel,
+            count: 1,
+          });
         }
       }
     }
@@ -2654,7 +2788,16 @@ function App() {
     } else if (screen === 'home' && canOfferInstall) {
       actions.push({ key: 'install', icon: 'download', label: t('install.now'), onClick: () => void handleInstallPwa(), active: false });
     } else if (screen === 'grades') {
-      actions.push({ key: 'refresh', icon: 'refresh', label: t('grades.refreshLabel'), onClick: () => void loadGradesData(true), active: false });
+      actions.push({
+        key: 'refresh',
+        icon: 'refresh',
+        label: t('grades.refreshLabel'),
+        onClick: () => {
+          void loadGradesData(true);
+          void loadGradesPlanFilters(true);
+        },
+        active: false,
+      });
     } else if (screen === 'finance') {
       actions.push({ key: 'refresh', icon: 'refresh', label: t('finance.refresh'), onClick: () => void loadFinanceData(true), active: false });
     } else if (screen === 'info') {

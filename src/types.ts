@@ -53,6 +53,7 @@ export interface Grade {
   countsIntoAverage?: boolean | null;
   examId?: string;
   examSessionNumber?: string;
+  gradeHistory?: string[];
 }
 
 export interface FinanceRecord {

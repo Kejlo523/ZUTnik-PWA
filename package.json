@@ -17,6 +17,7 @@
   },
   "dependencies": {
     "@fontsource/manrope": "^5.2.8",
+    "@fontsource/roboto-condensed": "^5.2.8",
     "@fontsource/space-grotesk": "^5.2.10",
     "cors": "^2.8.6",
     "dotenv": "^17.3.1",

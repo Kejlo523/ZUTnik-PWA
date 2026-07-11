@@ -13,7 +13,7 @@ import type {
 } from '../../types';
 import type { AppSettings } from '../../services/storage';
 import type { GroupedGradeView, TranslateFn } from '../viewTypes';
-import { fmtDec, gradeTone, initials, isFinalGradeType } from '../helpers';
+import { fmtDec, gradeCorrectionLabel, gradeTone, initials, isFinalGradeType } from '../helpers';
 import { Ic, Skeleton } from '../ui';
 
 function GradesLoadingSkeleton() {
@@ -471,11 +471,16 @@ export function GradesScreen({
                       {!isOpen && canExpand && (
                         <div className="grade-group-preview">
                           {previewItems.map((g, i) => (
-                            <span
-                              key={`${subject}-preview-${i}`}
-                              className={`grade-preview-pill ${gradeTone(g.grade)}`}
-                            >
-                              {g.grade.trim() || '–'}
+                            <span key={`${subject}-preview-${i}`} className="grade-preview-item">
+                              <span className="grade-preview-type">{gradeTypeText(g)}</span>
+                              <span className="grade-preview-value">
+                                <span className={`grade-preview-pill ${gradeTone(g.grade)}`}>
+                                  {g.grade.trim() || '–'}
+                                </span>
+                                {gradeCorrectionLabel(g) && (
+                                  <span className="grade-correction-note">{gradeCorrectionLabel(g)}</span>
+                                )}
+                              </span>
                             </span>
                           ))}
                           {previewOverflow > 0 && (
@@ -489,7 +494,10 @@ export function GradesScreen({
                           <div className="grade-group-items">
                             {visibleItems.map((g, i) => (
                               <div key={`${subject}-${i}`} className="grade-row">
-                                <span className={`grade-pill ${gradeTone(g.grade)}`}>{g.grade.trim() || '–'}</span>
+                                <span className="grade-value-stack">
+                                  <span className={`grade-pill ${gradeTone(g.grade)}`}>{g.grade.trim() || '–'}</span>
+                                  {gradeCorrectionLabel(g) && <span className="grade-correction-note">{gradeCorrectionLabel(g)}</span>}
+                                </span>
                                 <div className="grade-info">
                                   <div className="grade-type-chip">{gradeTypeText(g)}</div>
                                   {g.date && <div className="grade-date-teacher">{g.date}</div>}
@@ -509,7 +517,10 @@ export function GradesScreen({
                     <div key={`flat-${i}-${g.subjectName}`} className="grade-row grade-row-flat">
                       <div className="grade-flat-top">
                         <div className="grade-flat-subject">{g.subjectName || t('grades.subject')}</div>
-                        <span className={`grade-pill ${gradeTone(g.grade)}`}>{g.grade.trim() || '–'}</span>
+                        <span className="grade-value-stack">
+                          <span className={`grade-pill ${gradeTone(g.grade)}`}>{g.grade.trim() || '–'}</span>
+                          {gradeCorrectionLabel(g) && <span className="grade-correction-note">{gradeCorrectionLabel(g)}</span>}
+                        </span>
                       </div>
                       <div className="grade-flat-meta">
                         <div className="grade-type-chip">{gradeTypeText(g)}</div>
@@ -632,8 +643,7 @@ export function FinanceScreen({
             <div className="finance-hero">
               <div className="finance-hero-head">
                 <div className="finance-hero-copy">
-                  <div className="finance-eyebrow">{t('screen.finance')}</div>
-                  <div className="finance-hero-title">{t('finance.title')}</div>
+                  <div className="finance-hero-title">{t('finance.overview')}</div>
                   <div className="finance-hero-subtitle">{t('finance.subtitle')}</div>
                 </div>
                 <button

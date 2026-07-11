@@ -2,11 +2,11 @@
 
 const pl: Record<string, string> = {
     // Screen titles
-    'screen.home': 'Strona główna',
+    'screen.home': 'Start',
     'screen.plan': 'Plan zajęć',
     'screen.grades': 'Oceny',
     'screen.finance': 'Finanse',
-    'screen.info': 'Dane studenta',
+    'screen.info': 'Studia',
     'screen.news': 'Aktualności',
     'screen.newsDetail': 'Aktualność',
     'screen.stats': 'Statystyki',
@@ -19,13 +19,21 @@ const pl: Record<string, string> = {
     'drawer.plan': 'Plan zajęć',
     'drawer.grades': 'Oceny',
     'drawer.finance': 'Finanse',
-    'drawer.info': 'Dane studenta',
+    'drawer.info': 'Studia',
     'drawer.news': 'Aktualności',
     'drawer.links': 'Przydatne strony',
     'drawer.settings': 'Ustawienia',
     'drawer.about': 'O aplikacji',
     'drawer.stats': 'Statystyki',
     'drawer.logout': 'Wyloguj się',
+
+    // Primary navigation
+    'nav.label': 'Główna nawigacja',
+    'nav.home': 'Start',
+    'nav.plan': 'Plan',
+    'nav.info': 'Studia',
+    'nav.grades': 'Oceny',
+    'nav.more': 'Więcej',
 
     // Plan
     'plan.day': 'Dzień',
@@ -76,6 +84,7 @@ const pl: Record<string, string> = {
 
     // Finance
     'finance.title': 'Finanse',
+    'finance.overview': 'Podsumowanie',
     'finance.subtitle': 'Należności, salda i konta do wpłat z konta USOS.',
     'finance.refresh': 'Odśwież finanse',
     'finance.summaryDue': 'Do zapłaty',
@@ -162,7 +171,7 @@ const pl: Record<string, string> = {
     'general.logoutConfirm': 'Czy na pewno chcesz się wylogować?',
 
     // Home
-    'home.hello': 'Cześć,',
+    'home.hello': 'Witaj',
     'home.tiles': 'Skróty',
     'home.quickActions': 'Szybkie akcje',
     'home.tilePlan': 'Plan zajęć',
@@ -171,8 +180,8 @@ const pl: Record<string, string> = {
     'home.tileGradesDesc': 'Bieżący semestr',
     'home.tileFinance': 'Finanse',
     'home.tileFinanceDesc': 'Opłaty i salda',
-    'home.tileInfo': 'Profil',
-    'home.tileInfoDesc': 'Dane z systemu',
+    'home.tileInfo': 'Informacje o studiach',
+    'home.tileInfoDesc': 'Kierunek, status studenta i przebieg studiów',
     'home.tileNews': 'Aktualności',
     'home.tileNewsDesc': 'Wydarzenia i ogłoszenia',
     'home.tileLinks': 'Linki',
@@ -268,7 +277,7 @@ const pl: Record<string, string> = {
     'grades.studyField': 'Kierunek',
     'grades.subject': 'Przedmiot',
     'home.offlineMode': 'Tryb offline',
-    'home.quickAccess': 'Szybki dostęp',
+    'home.quickAccess': 'Szybkie skróty',
     'info.detailAlbum': 'Numer albumu',
     'info.detailFaculty': 'Wydział',
     'info.detailField': 'Kierunek',
@@ -356,7 +365,7 @@ const en: Record<string, string> = {
     'screen.plan': 'Schedule',
     'screen.grades': 'Grades',
     'screen.finance': 'Finance',
-    'screen.info': 'Student Info',
+    'screen.info': 'Studies',
     'screen.news': 'News',
     'screen.newsDetail': 'Article',
     'screen.stats': 'Statistics',
@@ -369,13 +378,21 @@ const en: Record<string, string> = {
     'drawer.plan': 'Schedule',
     'drawer.grades': 'Grades',
     'drawer.finance': 'Finance',
-    'drawer.info': 'Student Info',
+    'drawer.info': 'Studies',
     'drawer.news': 'News',
     'drawer.links': 'Useful Links',
     'drawer.settings': 'Settings',
     'drawer.about': 'About',
     'drawer.stats': 'Statistics',
     'drawer.logout': 'Log out',
+
+    // Primary navigation
+    'nav.label': 'Primary navigation',
+    'nav.home': 'Home',
+    'nav.plan': 'Plan',
+    'nav.info': 'Studies',
+    'nav.grades': 'Grades',
+    'nav.more': 'More',
 
     // Plan
     'plan.day': 'Day',
@@ -426,6 +443,7 @@ const en: Record<string, string> = {
 
     // Finance
     'finance.title': 'Finance',
+    'finance.overview': 'Overview',
     'finance.subtitle': 'Charges, balances, and bank accounts from the USOS account.',
     'finance.refresh': 'Refresh finance',
     'finance.summaryDue': 'Due',
@@ -512,7 +530,7 @@ const en: Record<string, string> = {
     'general.logoutConfirm': 'Are you sure you want to log out?',
 
     // Home
-    'home.hello': 'Hello,',
+    'home.hello': 'Welcome',
     'home.tiles': 'Shortcuts',
     'home.quickActions': 'Quick actions',
     'home.tilePlan': 'Schedule',
@@ -521,8 +539,8 @@ const en: Record<string, string> = {
     'home.tileGradesDesc': 'Current semester',
     'home.tileFinance': 'Finance',
     'home.tileFinanceDesc': 'Payments and balances',
-    'home.tileInfo': 'Profile',
-    'home.tileInfoDesc': 'System data',
+    'home.tileInfo': 'Study information',
+    'home.tileInfoDesc': 'Programme, student status and study history',
     'home.tileNews': 'News',
     'home.tileNewsDesc': 'Events and announcements',
     'home.tileLinks': 'Links',
@@ -617,7 +635,7 @@ const en: Record<string, string> = {
     'grades.studyField': 'Field of study',
     'grades.subject': 'Subject',
     'home.offlineMode': 'Offline mode',
-    'home.quickAccess': 'Quick access',
+    'home.quickAccess': 'Quick shortcuts',
     'info.detailAlbum': 'Student ID',
     'info.detailFaculty': 'Faculty',
     'info.detailField': 'Field of study',

@@ -1,5 +1,6 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import './App.css';
+import './zutnik-android.css';
 import type {
   CalendarEvent,
   CreditSummary,
@@ -67,6 +68,7 @@ import { relayoutDayEvents } from './app/planLayout';
 import { LOGO_SRC, MONTH_WEEKDAY_KEYS, SCREEN_I18N_KEY } from './app/constants';
 import {
   addDaysYmd,
+  collapseCorrectedGrades,
   extractGradeBaseSubject,
   fmtDateLabel,
   fmtDayMonth,
@@ -78,6 +80,7 @@ import {
   isFinalGradeType,
   isWeekendDate,
   parseGradeNum,
+  planTypeShort,
   planSubjectFilterSubject,
   planCacheKey,
   sumUniqueEcts,
@@ -86,9 +89,18 @@ import {
 import { Ic, Skeleton } from './app/ui';
 import type { DrawerScreenKey, NewsDetailParams, SelectedPlanEvent } from './app/viewTypes';
 import { HomeScreen, LoginScreen } from './app/screens/AuthScreens';
-import { AboutScreen, LinksScreen, NewsDetailScreen, NewsScreen, SettingsScreen, StatsScreen } from './app/screens/ContentScreens';
 import { PlanEventSheet, PlanFiltersSheet, PlanSearchSheet } from './app/screens/PlanOverlays';
-import { FinanceScreen, GradesScreen, InfoScreen } from './app/screens/StudyScreens';
+import { AppNavigation } from './app/AppNavigation';
+
+const GradesScreen = lazy(() => import('./app/screens/StudyScreens').then((module) => ({ default: module.GradesScreen })));
+const FinanceScreen = lazy(() => import('./app/screens/StudyScreens').then((module) => ({ default: module.FinanceScreen })));
+const InfoScreen = lazy(() => import('./app/screens/StudyScreens').then((module) => ({ default: module.InfoScreen })));
+const AboutScreen = lazy(() => import('./app/screens/ContentScreens').then((module) => ({ default: module.AboutScreen })));
+const LinksScreen = lazy(() => import('./app/screens/ContentScreens').then((module) => ({ default: module.LinksScreen })));
+const NewsDetailScreen = lazy(() => import('./app/screens/ContentScreens').then((module) => ({ default: module.NewsDetailScreen })));
+const NewsScreen = lazy(() => import('./app/screens/ContentScreens').then((module) => ({ default: module.NewsScreen })));
+const SettingsScreen = lazy(() => import('./app/screens/ContentScreens').then((module) => ({ default: module.SettingsScreen })));
+const StatsScreen = lazy(() => import('./app/screens/ContentScreens').then((module) => ({ default: module.StatsScreen })));
 
 const SESSION_VALIDATE_INTERVAL_MS = 30 * 24 * 60 * 60_000;
 const EMPTY_FINANCE_SNAPSHOT: FinanceSnapshot = { records: [], fetchedAt: 0 };
@@ -98,6 +110,19 @@ const STATS_OWNER_ALBUM = '57796';
 const PHONE_VIEWPORT_MAX_SIDE = 700;
 const PHONE_VIEWPORT_SCALE_FIX_RATIO = 1.35;
 const PHONE_VIEWPORT_MAX_SCALE_FIX = 3;
+
+function ScreenChunkFallback() {
+  return (
+    <section className="screen screen-chunk-fallback" aria-busy="true">
+      <Skeleton className="skeleton-line skeleton-line-md" style={{ width: '180px' }} />
+      <div className="screen-chunk-fallback-grid">
+        <Skeleton className="skeleton-block" />
+        <Skeleton className="skeleton-block" />
+        <Skeleton className="skeleton-block" />
+      </div>
+    </section>
+  );
+}
 
 interface PhoneViewportState {
   isPhone: boolean;
@@ -506,22 +531,32 @@ function App() {
 
   // ── Student photo loading via fetch (avoids CORS / cache issues) ────────
   const [studentPhotoBlobUrl, setStudentPhotoBlobUrl] = useState<string | null>(null);
+  const studentPhotoBlobUrlRef = useRef<string | null>(null);
 
   useEffect(() => {
+    if (studentPhotoBlobUrlRef.current) {
+      URL.revokeObjectURL(studentPhotoBlobUrlRef.current);
+      studentPhotoBlobUrlRef.current = null;
+    }
     setStudentPhotoError(false);
     setStudentPhotoBlobUrl(null);
+  }, [sessionKey]);
 
-    if (!session?.usos) return;
+  useEffect(() => {
+    if (screen !== 'info' || !session?.usos || studentPhotoBlobUrl || studentPhotoError) return;
 
     let cancelled = false;
-    let createdBlobUrl: string | null = null;
     (async () => {
       try {
         const blob = await fetchStudentPhotoBlob(session);
         if (cancelled) return;
         if (!blob || blob.size === 0) { setStudentPhotoError(true); return; }
         const blobUrl = URL.createObjectURL(blob);
-        createdBlobUrl = blobUrl;
+        if (cancelled) {
+          URL.revokeObjectURL(blobUrl);
+          return;
+        }
+        studentPhotoBlobUrlRef.current = blobUrl;
         setStudentPhotoBlobUrl(blobUrl);
       } catch {
         if (!cancelled) setStudentPhotoError(true);
@@ -529,9 +564,14 @@ function App() {
     })();
     return () => {
       cancelled = true;
-      if (createdBlobUrl) URL.revokeObjectURL(createdBlobUrl);
     };
-  }, [session, sessionKey]);
+  }, [screen, session, sessionKey, studentPhotoBlobUrl, studentPhotoError]);
+
+  useEffect(() => () => {
+    if (studentPhotoBlobUrlRef.current) {
+      URL.revokeObjectURL(studentPhotoBlobUrlRef.current);
+    }
+  }, []);
 
   const showToast = useCallback((msg: string) => setToast(msg), []);
   const showGlobalError = useCallback((error: unknown, fallback?: string) => {
@@ -1008,6 +1048,15 @@ function App() {
     return trackedPromise;
   }, [activeStudyId, planViewMode, session]);
 
+  const hydratePlanHiddenSubjects = useCallback((album: string, requestId: string) => {
+    const normalizedAlbum = album.trim();
+    if (!normalizedAlbum) return;
+    void loadPersistedPlanHiddenSubjects(normalizedAlbum).then((keys) => {
+      if (planRequestIdRef.current !== requestId) return;
+      setPlanHiddenSubjectsForAlbum(normalizedAlbum, keys);
+    });
+  }, [loadPersistedPlanHiddenSubjects, setPlanHiddenSubjectsForAlbum]);
+
   const loadPlanData = useCallback(async (search?: { category: string; query: string }, forceRefresh = false, newDate?: string) => {
     if (!session) return;
     const dateToUse = newDate || planDate;
@@ -1022,6 +1071,17 @@ function App() {
     // Create unique request ID to cancel old requests
     const requestId = Math.random().toString(36).substr(2, 9);
     planRequestIdRef.current = requestId;
+
+    if (!isSearch && !forceRefresh) {
+      const freshCachedPlan = cache.loadPlan(cacheKey);
+      if (freshCachedPlan) {
+        setGlobalError('');
+        setPlanResult(freshCachedPlan);
+        hydratePlanHiddenSubjects(freshCachedPlan.debug.album || '', requestId);
+        setPlanLoading(false);
+        return;
+      }
+    }
 
     if (!(await ensureSessionStillValid(session))) {
       if (planRequestIdRef.current === requestId) {
@@ -1038,23 +1098,15 @@ function App() {
         viewMode: planViewMode,
         currentDate: dateToUse,
       });
-      const bufferedHiddenSubjectKeys = await loadPersistedPlanHiddenSubjects(bufferedResult.debug.album || '');
-      if (planRequestIdRef.current !== requestId) {
-        return;
-      }
-      setPlanHiddenSubjectsForAlbum(bufferedResult.debug.album || '', bufferedHiddenSubjectKeys);
       if (!isSearch) cache.savePlan(cacheKey, bufferedResult);
       setPlanResult(bufferedResult);
+      hydratePlanHiddenSubjects(bufferedResult.debug.album || '', requestId);
     } else if (!isSearch && !forceRefresh) {
       const cached = cache.loadPlanForce(cacheKey);
       if (cached) {
         hasCached = true;
-        const cachedHiddenSubjectKeys = await loadPersistedPlanHiddenSubjects(cached.debug.album || '');
-        if (planRequestIdRef.current !== requestId) {
-          return;
-        }
-        setPlanHiddenSubjectsForAlbum(cached.debug.album || '', cachedHiddenSubjectKeys);
         setPlanResult(cached);
+        hydratePlanHiddenSubjects(cached.debug.album || '', requestId);
       }
       // Task 7: Reuse week cache for day view
       if (!cached && planViewMode === 'day' && planResult && planResult.dayColumns) {
@@ -1069,12 +1121,8 @@ function App() {
             nextDate: addDaysYmd(dateToUse, 1),
           };
           hasCached = true;
-          const syntheticHiddenSubjectKeys = await loadPersistedPlanHiddenSubjects(syntheticResult.debug.album || '');
-          if (planRequestIdRef.current !== requestId) {
-            return;
-          }
-          setPlanHiddenSubjectsForAlbum(syntheticResult.debug.album || '', syntheticHiddenSubjectKeys);
           setPlanResult(syntheticResult);
+          hydratePlanHiddenSubjects(syntheticResult.debug.album || '', requestId);
         }
       }
     }
@@ -1110,14 +1158,9 @@ function App() {
         viewMode: planViewMode,
         currentDate: dateToUse,
       });
-      const resultHiddenSubjectKeys = await loadPersistedPlanHiddenSubjects(result.debug.album || '');
-      if (planRequestIdRef.current !== requestId) {
-        return;
-      }
-
-      setPlanHiddenSubjectsForAlbum(result.debug.album || '', resultHiddenSubjectKeys);
       if (!isSearch) cache.savePlan(cacheKey, result);
       setPlanResult(result);
+      hydratePlanHiddenSubjects(result.debug.album || '', requestId);
       if (!isSearch && result.currentDate && !newDate) setPlanDate(result.currentDate);
     } catch (e) {
       if (planRequestIdRef.current === requestId) {
@@ -1142,8 +1185,7 @@ function App() {
     showGlobalError,
     ensureSessionStillValid,
     handleSessionError,
-    loadPersistedPlanHiddenSubjects,
-    setPlanHiddenSubjectsForAlbum,
+    hydratePlanHiddenSubjects,
   ]);
 
   // Fetch plan search suggestions with debouncing (300ms)
@@ -1281,6 +1323,8 @@ function App() {
     const gradesCacheKey = `${gradesCacheBase}_active_terms_v4`;
     const gradesCacheKeys = [gradesCacheKey, `${gradesCacheBase}_active_terms_v3`];
     let hasCachedGrades = false;
+    const cachedCreditSummary = activeStudyId ? cache.loadInfoForce(activeStudyId)?.credits : null;
+    if (cachedCreditSummary) setCredits(cachedCreditSummary);
     if (!forceRefresh) {
       const cached = gradesCacheKeys.map((key) => cache.loadGradesForce(key)).find((items): items is Grade[] => Boolean(items));
       if (cached) {
@@ -1293,11 +1337,6 @@ function App() {
         const cleanedFreshCached = keepRealGrades(freshCached);
         cache.saveGrades(gradesCacheKey, cleanedFreshCached);
         setGrades(cleanedFreshCached);
-        if (!creditsRef.current) {
-          void fetchCreditSummary(session, activeStudyId).then((summary) => {
-            if (summary) setCredits(summary);
-          }).catch(() => undefined);
-        }
         return;
       }
     }
@@ -1448,13 +1487,20 @@ function App() {
     if (screen === 'plan') void loadPlanData();
     if (screen === 'grades') {
       void loadGradesData();
-      void loadGradesPlanFilters();
     }
     if (screen === 'finance') void loadFinanceData();
     if (screen === 'info') void loadInfoData();
     if (screen === 'news') void loadNewsData();
     if (screen === 'stats') void loadStatsData();
   }, [screen, session]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (!session || screen !== 'grades') return;
+    const timer = window.setTimeout(() => {
+      void loadGradesPlanFilters();
+    }, 650);
+    return () => window.clearTimeout(timer);
+  }, [screen, session, loadGradesPlanFilters]);
 
   const prevStudyId = useRef<string | null>(null);
   useEffect(() => {
@@ -1484,7 +1530,7 @@ function App() {
     if (screen === 'plan') void loadPlanData();
     if (screen === 'grades') {
       void loadGradesData(true);
-      void loadGradesPlanFilters(true);
+      window.setTimeout(() => void loadGradesPlanFilters(true), 650);
     }
     if (screen === 'finance') void loadFinanceData();
     if (screen === 'info') void loadInfoData();
@@ -1515,10 +1561,15 @@ function App() {
     });
   }, [grades, hiddenGradePlanFilterItems]);
 
+  const effectiveVisibleGrades = useMemo(
+    () => collapseCorrectedGrades(visibleGrades),
+    [visibleGrades],
+  );
+
   const groupedGrades = useMemo(() => {
     const grouped = new Map<string, { subject: string; finalGradeItem: Grade | null; others: Grade[]; emptyFromPlanFilter: boolean }>();
 
-    for (const g of visibleGrades) {
+    for (const g of effectiveVisibleGrades) {
       const subject = extractGradeBaseSubject(g.subjectName);
       if (!subject) continue;
 
@@ -1584,7 +1635,7 @@ function App() {
       })
       .filter((group) => group.items.length > 0 || group.finalGrade.trim() || group.emptyFromPlanFilter)
       .sort((a, b) => a.subject.localeCompare(b.subject, 'pl'));
-  }, [gradesPlanSubjectFilters, hiddenGradesPlanSubjectKeys, visibleGrades]);
+  }, [effectiveVisibleGrades, gradesPlanSubjectFilters, hiddenGradesPlanSubjectKeys]);
 
   useEffect(() => {
     setExpandedGradeSubjects(prev => {
@@ -1612,7 +1663,7 @@ function App() {
     let sumWeights = 0;
     let usedFinal = false;
 
-    for (const g of visibleGrades) {
+    for (const g of effectiveVisibleGrades) {
       if (!isFinalGradeType(g.type, g.subjectName)) continue;
       const v = parseGradeNum(g.grade);
       if (v === null) continue;
@@ -1631,7 +1682,7 @@ function App() {
     if (!usedFinal) {
       sumWeighted = 0;
       sumWeights = 0;
-      for (const g of visibleGrades) {
+      for (const g of effectiveVisibleGrades) {
         const v = parseGradeNum(g.grade);
         if (v === null) continue;
 
@@ -1647,13 +1698,13 @@ function App() {
     }
 
     const avg = sumWeights > 0 ? fmtDec(sumWeighted / sumWeights, 2) : '-';
-    const fallbackEcts = Math.max(0, sumUniqueEcts(visibleGrades));
+    const fallbackEcts = Math.max(0, sumUniqueEcts(effectiveVisibleGrades));
     return {
       avg,
       ectsSem: formatCreditMetric(credits?.programmeUsed, fallbackEcts),
       ectsTotal: formatCreditMetric(credits?.overallUsed, fallbackEcts),
     };
-  }, [credits, visibleGrades]);
+  }, [credits, effectiveVisibleGrades]);
 
   const links = useMemo(() => sortUsefulLinks(studies), [studies]);
 
@@ -1721,9 +1772,9 @@ function App() {
       for (const ev of col.events) { minS = Math.min(minS, ev.startMin); maxE = Math.max(maxE, ev.endMin); }
     }
     const s0 = Number.isFinite(minS) ? minS : 7 * 60;
-    const e0 = maxE > 0 ? maxE : 21 * 60;
-    const startMin = Math.max(6 * 60, Math.floor((s0 - 30) / 60) * 60);
-    const endMin = Math.max(startMin + 60, Math.min(23 * 60, Math.ceil((e0 + 30) / 60) * 60));
+    const e0 = maxE > 0 ? maxE : 17 * 60;
+    const startMin = Math.min(6 * 60, Math.floor((s0 - 30) / 60) * 60);
+    const endMin = Math.max(18 * 60, Math.min(23 * 60, Math.ceil((e0 + 30) / 60) * 60));
     const hh = settings.compactPlan ? 44 : 56;
     const slots: number[] = [];
     for (let m = startMin; m < endMin; m += 60) slots.push(m);
@@ -1868,6 +1919,7 @@ function App() {
     { key: 'settings', label: t('drawer.settings'), icon: 'settings' },
     { key: 'about', label: t('drawer.about'), icon: 'about' },
   ];
+  const moreDrawerItems = drawerItems.filter((item) => !['home', 'plan', 'info', 'grades'].includes(item.key));
 
   // ── Plan carousel animation helpers ─────────────────────────────────────────
   function applyCarouselTransform(x: number, animated: boolean, duration = 240) {
@@ -1963,7 +2015,10 @@ function App() {
   }
 
   function renderHome() {
-    return <HomeScreen session={session} isOnline={isOnline} t={t} openScreen={openScreen} />;
+    const activeStudyLabel = studies.find((study) => study.przynaleznoscId === activeStudyId)?.label
+      ?? studies[0]?.label
+      ?? '';
+    return <HomeScreen session={session} studyLabel={activeStudyLabel} isOnline={isOnline} t={t} openScreen={openScreen} />;
   }
 
   function getPeriodDisplayName(key: string): string {
@@ -2360,6 +2415,7 @@ function App() {
                                           >
                                             <div className="day-event-title">{ev.title}</div>
                                             <div className="day-event-meta">{ev.startStr}-{ev.endStr} · {ev.room}{ev.group ? ` · ${ev.group}` : ''}</div>
+                                            <div className="plan-event-type">({planTypeShort(ev.typeClass, ev.typeLabel)})</div>
                                           </div>
                                         );
                                       })
@@ -2462,9 +2518,15 @@ function App() {
                                             title={`${ev.startStr} - ${ev.endStr} ${ev.title}`}
                                           >
                                             <div className="week-event-time">
-                                              {ev.startStr}-{ev.endStr}{ev.room && ev.room !== '-' ? ` - ${ev.room}` : ''}
+                                              {ev.startStr}-{ev.endStr}
                                             </div>
+                                            {(ev.room || ev.group) && (
+                                              <div className="week-event-context">
+                                                {[ev.room !== '-' ? ev.room : '', ev.group].filter(Boolean).join(' · ')}
+                                              </div>
+                                            )}
                                             <div className="week-event-title">{ev.title}</div>
+                                            <div className="plan-event-type">({planTypeShort(ev.typeClass, ev.typeLabel)})</div>
                                           </div>
                                         );
                                       })
@@ -2533,7 +2595,7 @@ function App() {
         t={t}
         gradesSummary={gradesSummary}
         gradesLoading={gradesLoading}
-        grades={visibleGrades}
+        grades={effectiveVisibleGrades}
         settings={settings}
         groupedGrades={groupedGrades}
         expandedGradeSubjects={expandedGradeSubjects}
@@ -2779,8 +2841,7 @@ function App() {
         icon: 'refresh',
         label: t('grades.refreshLabel'),
         onClick: () => {
-          void loadGradesData(true);
-          void loadGradesPlanFilters(true);
+          void loadGradesData(true).then(() => loadGradesPlanFilters(true));
         },
         active: false,
       });
@@ -2945,8 +3006,19 @@ function App() {
 
       {/* Main content */}
       <main key={screen}>
-        {renderScreen()}
+        <Suspense fallback={<ScreenChunkFallback />}>
+          {renderScreen()}
+        </Suspense>
       </main>
+
+      {screen !== 'login' && screen !== 'news-detail' && (
+        <AppNavigation
+          screen={screen}
+          t={t}
+          openScreen={openScreen}
+          onMore={() => setDrawerOpen(true)}
+        />
+      )}
 
       {/* Toast */}
       {toast && <div className="toast">{toast}</div>}
@@ -3014,18 +3086,19 @@ function App() {
         <div className={`app-drawer ${drawerOpen ? 'open' : ''}`} aria-hidden={!drawerOpen} aria-modal={drawerOpen}>
           <button type="button" className="drawer-backdrop" onClick={() => setDrawerOpen(false)} aria-label={t('general.closeMenu')} />
           <aside className="drawer-panel" role="navigation" aria-label={t('general.openMenu')}>
+            <div className="drawer-grabber" aria-hidden />
             <div className="drawer-header">
               <img src={LOGO_SRC} alt="ZUTnik" className="drawer-header-logo" />
               <div className="drawer-header-info">
-                <div className="drawer-header-title">ZUTnik</div>
-                <div className="drawer-header-user">{session?.username || t('info.studentNameFallback')}</div>
+                <div className="drawer-header-title">{t('nav.more')}</div>
+                <div className="drawer-header-user">ZUTnik PWA</div>
               </div>
             </div>
 
             <div className="drawer-divider" />
 
             <div className="drawer-list">
-              {drawerItems.map(item => (
+              {moreDrawerItems.map(item => (
                 <button key={item.key} type="button" className={`drawer-item ${screen === item.key ? 'active' : ''}`} onClick={() => openScreen(item.key)}>
                   <span className="drawer-item-icon"><Ic n={item.icon} /></span>
                   {item.label}

@@ -51,8 +51,8 @@ export default defineConfig({
         display: 'standalone',
         display_override: ['standalone', 'minimal-ui'],
         orientation: 'any',
-        background_color: '#071015',
-        theme_color: '#0f1f2a',
+        background_color: '#101317',
+        theme_color: '#171c21',
         lang: 'pl',
         icons: [
           {
@@ -106,7 +106,7 @@ export default defineConfig({
             handler: 'NetworkFirst',
             options: {
               cacheName: 'api-cache',
-              networkTimeoutSeconds: 8,
+              networkTimeoutSeconds: 4,
               expiration: { maxAgeSeconds: 3600, maxEntries: 40 },
               cacheableResponse: { statuses: [200] },
             },

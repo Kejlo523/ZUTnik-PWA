@@ -46,24 +46,28 @@ export function LoginScreen({
 
 interface HomeScreenProps {
   session: SessionData | null;
+  studyLabel: string;
   isOnline: boolean;
   t: TranslateFn;
   openScreen: (screen: DrawerScreenKey) => void;
 }
 
-export function HomeScreen({ session, isOnline, t, openScreen }: HomeScreenProps) {
+export function HomeScreen({ session, studyLabel, isOnline, t, openScreen }: HomeScreenProps) {
   const firstName = session?.username?.split(' ')[0] ?? 'Student';
 
   return (
     <section className="screen home-screen">
       <div className="home-scroll-content">
         <div className="home-hero-card">
+          <span className="home-hero-rail" aria-hidden />
+          <img src={LOGO_SRC} alt="" className="home-hero-logo" />
           <div className="home-hero-greeting-row">
-            <div>
+            <div className="home-hero-copy">
               <div className="home-hero-hello">{t('home.hello')}</div>
+              {' '}
               <div className="home-hero-name">{firstName}</div>
+              {studyLabel && <div className="home-hero-study">{studyLabel}</div>}
             </div>
-            <div className="home-hero-avatar">{firstName[0]?.toUpperCase() ?? 'S'}</div>
           </div>
 
           {!isOnline && (
@@ -71,16 +75,16 @@ export function HomeScreen({ session, isOnline, t, openScreen }: HomeScreenProps
           )}
         </div>
 
-        <div className="home-tiles-label">{t('home.quickAccess')}</div>
+        <div className="home-section-heading">
+          <div className="home-tiles-label">{t('home.quickAccess')}</div>
+          <span aria-hidden />
+        </div>
         <div className="tile-grid">
           {([
             { key: 'plan' as const, label: t('home.tilePlan'), desc: t('home.tilePlanDesc'), icon: 'calendar' },
             { key: 'grades' as const, label: t('home.tileGrades'), desc: t('home.tileGradesDesc'), icon: 'grade' },
-            { key: 'finance' as const, label: t('home.tileFinance'), desc: t('home.tileFinanceDesc'), icon: 'wallet' },
             { key: 'info' as const, label: t('home.tileInfo'), desc: t('home.tileInfoDesc'), icon: 'user' },
             { key: 'news' as const, label: t('home.tileNews'), desc: t('home.tileNewsDesc'), icon: 'news' },
-            { key: 'links' as const, label: t('home.tileLinks'), desc: t('home.tileLinksDesc'), icon: 'link' },
-            { key: 'settings' as const, label: t('home.tileSettings'), desc: t('home.tileSettingsDesc'), icon: 'settings' },
           ] satisfies Array<{ key: DrawerScreenKey; label: string; desc: string; icon: string }>).map((tile) => (
             <button key={tile.key} type="button" className="tile" onClick={() => openScreen(tile.key)}>
               <div className="tile-icon"><Ic n={tile.icon} /></div>

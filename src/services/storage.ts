@@ -154,14 +154,14 @@ interface CacheEntry<T> {
 }
 
 const TTL_MS = {
-  studies: 15 * 60_000,
-  semesters: 15 * 60_000,
-  grades: 10 * 60_000,
-  courseTests: 10 * 60_000,
-  finance: 4 * 60 * 60_000,
-  info: 15 * 60_000,
-  plan: 5 * 60_000,
-  news: 30 * 60_000,
+  studies: 7 * 24 * 60 * 60_000,
+  semesters: 7 * 24 * 60 * 60_000,
+  grades: 6 * 60 * 60_000,
+  courseTests: 6 * 60 * 60_000,
+  finance: 24 * 60 * 60_000,
+  info: 7 * 24 * 60 * 60_000,
+  plan: 30 * 60_000,
+  news: 24 * 60 * 60_000,
 };
 
 function ck(name: string, suffix = ''): string {

@@ -734,7 +734,6 @@ function eventTypeClass(event: Record<string, string>): string {
   const subject = normalizePlanFilterString(event.subject || event.title);
   const hay = `${form} ${subject}`;
 
-  if (status === 'e') return 'exam';
   if (status === 'o') return 'cancelled';
   if (status === 'zz') return 'remote';
   if (hay.includes('laboratorium') || hay.includes('laboratory') || form.includes(' lab') || short === 'l' || short.includes('lab')) return 'lab';
@@ -750,6 +749,7 @@ function eventTypeClass(event: Record<string, string>): string {
   if (hay.includes('konwersatorium') || short === 'k') return 'conservatory';
   if (hay.includes('konsultacje')) return 'consultation';
   if (hay.includes('terenowe')) return 'field';
+  if (status === 'e') return 'exam';
   return 'class';
 }
 

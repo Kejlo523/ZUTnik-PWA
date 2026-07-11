@@ -245,6 +245,128 @@ export function parseGradeNum(g: string): number | null {
   return Number.isFinite(v) ? v : null;
 }
 
+const DAY_MS = 24 * 60 * 60 * 1000;
+const FAIL_TO_PASS_CORRECTION_WINDOW_MS = 120 * DAY_MS;
+const PAIR_CORRECTION_WINDOW_MS = 45 * DAY_MS;
+
+function gradeTimestamp(grade: Grade): number {
+  const value = cleanGradeText(grade.date);
+  if (!value) return 0;
+
+  const iso = Date.parse(value);
+  if (Number.isFinite(iso)) return iso;
+
+  const pl = value.match(/^(\d{2})\.(\d{2})\.(\d{4})/);
+  if (!pl) return 0;
+  return Date.UTC(Number(pl[3]), Number(pl[2]) - 1, Number(pl[1]));
+}
+
+function gradeSession(grade: Grade): number {
+  const value = Number.parseInt(String(grade.examSessionNumber || ''), 10);
+  return Number.isFinite(value) ? value : 0;
+}
+
+function correctionKey(grade: Grade, index: number): string {
+  const subject = normalizePlanFilterString(extractGradeBaseSubject(grade.subjectName) || grade.subjectName);
+  if (!subject) return `unique:${index}`;
+
+  const type = resolveGradeTypeKey(grade)
+    || normalizePlanFilterString(grade.type || extractGradeTypeFromSubject(grade.subjectName))
+    || (isFinalGradeType(grade.type, grade.subjectName) ? 'final' : 'grade');
+  const courseId = normalizePlanFilterString(grade.courseId || '');
+  return `${subject}|${courseId}|${type}`;
+}
+
+function shouldCollapseCorrection(entries: Array<{ grade: Grade; index: number }>): boolean {
+  const values = new Set<string>();
+  const courseIds = new Set<string>();
+  const sessions = new Set<number>();
+  const numeric: number[] = [];
+  const times: number[] = [];
+
+  for (const { grade } of entries) {
+    const value = cleanGradeText(grade.grade).replace(',', '.');
+    if (value) values.add(value);
+    const courseId = normalizePlanFilterString(grade.courseId || '');
+    if (courseId) courseIds.add(courseId);
+    const session = gradeSession(grade);
+    if (session > 0) sessions.add(session);
+    const parsed = parseGradeNum(value);
+    if (parsed !== null) numeric.push(parsed);
+    const time = gradeTimestamp(grade);
+    if (time > 0) times.push(time);
+  }
+
+  if (values.size < 2 || numeric.length < 2) return false;
+  if (sessions.size > 1) return true;
+
+  const span = times.length > 0 ? Math.max(...times) - Math.min(...times) : Number.POSITIVE_INFINITY;
+  if (Math.min(...numeric) <= 2 && Math.max(...numeric) > 2 && span <= FAIL_TO_PASS_CORRECTION_WINDOW_MS) {
+    return true;
+  }
+  return entries.length === 2 && courseIds.size <= 1 && span <= PAIR_CORRECTION_WINDOW_MS;
+}
+
+function compareGradeOrder(
+  left: { grade: Grade; index: number },
+  right: { grade: Grade; index: number },
+): number {
+  const byTime = gradeTimestamp(left.grade) - gradeTimestamp(right.grade);
+  if (byTime !== 0) return byTime;
+  const bySession = gradeSession(left.grade) - gradeSession(right.grade);
+  if (bySession !== 0) return bySession;
+  const leftValue = parseGradeNum(left.grade.grade);
+  const rightValue = parseGradeNum(right.grade.grade);
+  if (leftValue !== null && rightValue !== null && leftValue !== rightValue) return leftValue - rightValue;
+  return left.index - right.index;
+}
+
+export function collapseCorrectedGrades(source: Grade[]): Grade[] {
+  const grouped = new Map<string, Array<{ grade: Grade; index: number }>>();
+  source.forEach((grade, index) => {
+    const key = correctionKey(grade, index);
+    const entries = grouped.get(key) || [];
+    entries.push({ grade, index });
+    grouped.set(key, entries);
+  });
+
+  const result: Grade[] = [];
+  for (const entries of grouped.values()) {
+    if (entries.length < 2 || !shouldCollapseCorrection(entries)) {
+      result.push(...entries.map(({ grade }) => ({ ...grade, gradeHistory: [...(grade.gradeHistory || [])] })));
+      continue;
+    }
+
+    const ordered = [...entries].sort(compareGradeOrder);
+    const active = ordered[ordered.length - 1].grade;
+    const history: string[] = [];
+    for (const { grade } of ordered) {
+      const value = cleanGradeText(grade.grade);
+      if (value && history[history.length - 1]?.replace(',', '.') !== value.replace(',', '.')) history.push(value);
+    }
+    result.push({ ...active, gradeHistory: history });
+  }
+  return result;
+}
+
+export function gradeCorrectionLabel(grade: Grade): string {
+  const current = cleanGradeText(grade.grade);
+  if (!current || !grade.gradeHistory || grade.gradeHistory.length < 2) return '';
+  const previous = grade.gradeHistory.find((value) => cleanGradeText(value).replace(',', '.') !== current.replace(',', '.'));
+  return previous ? `${previous} → ${current}` : '';
+}
+
+export function planTypeShort(typeClass: string, typeLabel: string): string {
+  const codes: Record<string, string> = {
+    lecture: 'W', lab: 'L', auditory: 'Ć', exercise: 'Ć', project: 'P',
+    seminar: 'S', language: 'J', lectorate: 'J', exam: 'E', pass: 'Z',
+    remote: 'Z', cancelled: 'O', field: 'T', class: 'Z',
+  };
+  if (codes[typeClass]) return codes[typeClass];
+  const label = cleanGradeText(typeLabel);
+  return label ? label.slice(0, 1).toLocaleUpperCase('pl') : 'Z';
+}
+
 export function fmtDec(v: number, d: number): string {
   if (!Number.isFinite(v)) return '-';
   return v.toFixed(d).replace('.', ',');

@@ -628,6 +628,10 @@ textarea:focus-visible {
   font-weight: 700;
 }
 
+.plan-mode-btn-floating.active:focus-visible {
+  outline: 0;
+}
+
 .plan-mode-btn-floating.active {
   background: var(--mz-primary);
   color: #101317;
@@ -1883,5 +1887,623 @@ textarea:focus-visible {
     animation-duration: .01ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: .01ms !important;
+  }
+}
+
+/* 2026 workspace motion and Android plan parity */
+:root {
+  --motion-fast: 120ms;
+  --motion-standard: 180ms;
+  --motion-panel: 240ms;
+  --ease-standard: cubic-bezier(.2, 0, 0, 1);
+  --ease-emphasized: cubic-bezier(.2, .8, .2, 1);
+}
+
+.app-shell.is-plan,
+.app-shell.is-plan.is-phone-viewport,
+.app-shell.is-plan.is-phone-viewport.is-phone-scale-fix {
+  grid-template-rows: 96px minmax(0, 1fr) var(--primary-nav-h);
+}
+
+.plan-appbar,
+.app-shell.is-phone-viewport .plan-appbar {
+  display: grid;
+  grid-template: auto auto / minmax(0, 1fr) auto;
+  align-content: center;
+  gap: 2px 8px;
+  height: 96px;
+  min-height: 96px;
+  padding: 7px 12px 5px 18px;
+}
+
+.plan-appbar-heading {
+  grid-column: 1 / -1;
+  min-width: 0;
+}
+
+.plan-appbar .plan-appbar-heading h1 {
+  margin: 0;
+  font-size: 27px;
+  line-height: 1;
+}
+
+.plan-appbar-heading > span {
+  display: block;
+  margin-top: 5px;
+  color: var(--mz-muted);
+  font-size: 11px;
+  line-height: 1;
+}
+
+.plan-appbar-range {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--mz-text);
+  font-family: var(--font-data);
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 32px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.plan-appbar .appbar-actions {
+  grid-column: 2;
+  gap: 0;
+}
+
+.plan-appbar .icon-btn {
+  width: 32px;
+  min-width: 32px;
+  height: 32px;
+  padding: 6px;
+}
+
+.app-shell.is-plan main,
+.app-shell.is-plan.is-phone-viewport main {
+  overflow: hidden;
+}
+
+.plan-screen,
+.app-shell.is-phone-viewport .plan-screen {
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 0;
+  width: 100%;
+  max-width: none;
+  height: 100%;
+  min-height: 0;
+  padding: 0;
+}
+
+.plan-control-pane,
+.app-shell.is-phone-viewport .plan-control-pane {
+  margin: 0;
+  padding: 4px 18px 8px;
+}
+
+.plan-control-pane .plan-sticky-header {
+  display: none;
+}
+
+.plan-floating-toolbar,
+.app-shell.is-phone-viewport .plan-floating-toolbar {
+  min-height: 40px;
+  padding: 2px;
+}
+
+.plan-mode-btn-floating {
+  min-height: 36px;
+  transition: background-color var(--motion-fast) linear, color var(--motion-fast) linear;
+}
+
+.plan-content,
+.app-shell.is-phone-viewport .plan-content {
+  min-height: 0;
+  overflow: auto;
+  scrollbar-gutter: stable;
+}
+
+.week-card,
+.day-tl-card,
+.month-shell {
+  width: 100%;
+  border-radius: 8px 8px 0 0;
+}
+
+.week-grid {
+  --plan-time-col-w: 40px;
+}
+
+.week-head-row {
+  min-height: 48px;
+  border-bottom-color: var(--mz-border-soft);
+}
+
+.week-head-day,
+.week-head-time {
+  min-height: 48px;
+}
+
+.week-head-day {
+  padding: 5px 2px;
+}
+
+.week-head-day strong {
+  font-size: 10px;
+}
+
+.week-head-day span {
+  font-size: 9px;
+}
+
+.week-time-col {
+  border-right: 0;
+}
+
+.week-time-cell {
+  padding-top: 2px;
+  padding-right: 4px;
+  border-top: 0;
+  font-size: 10px;
+  font-weight: 500;
+}
+
+.week-day-col {
+  border-right-color: rgb(255 255 255 / 8%);
+}
+
+.week-hour-line {
+  border-color: rgb(255 255 255 / 13%);
+}
+
+.week-event,
+.day-event {
+  --event-accent: var(--ev-lecture);
+  container-type: inline-size;
+  container-name: plan-event;
+  animation: none;
+  border-color: color-mix(in srgb, var(--event-accent) 72%, white 12%);
+  background: color-mix(in srgb, var(--event-accent) 86%, var(--mz-surface));
+  transition: filter var(--motion-fast) linear;
+}
+
+.ev-lecture,
+.ev-class { --event-accent: var(--ev-lecture); }
+.ev-lab { --event-accent: var(--ev-lab); }
+.ev-auditory { --event-accent: var(--ev-auditory); }
+.ev-exam,
+.ev-exam-remote { --event-accent: var(--ev-exam); }
+.ev-remote { --event-accent: var(--ev-remote); }
+.ev-pass { --event-accent: var(--ev-pass); }
+.ev-cancelled { --event-accent: var(--ev-cancelled); }
+
+.week-event-time {
+  font-size: clamp(7.4px, 16cqw, 9.3px);
+}
+
+.event-time-start {
+  display: none;
+}
+
+.week-event-context {
+  font-size: clamp(5px, 12cqw, 8.9px);
+}
+
+.week-event-title {
+  margin-top: 3px;
+  font-size: clamp(5.6px, 17cqw, 10.2px);
+  line-height: .95;
+  -webkit-line-clamp: 7;
+}
+
+.plan-event-type {
+  font-size: clamp(8px, 15cqw, 9px);
+}
+
+@container plan-event (max-width: 42px) {
+  .event-time-full { display: none; }
+  .event-time-start { display: inline; }
+}
+
+.drawer-close {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  min-width: 40px;
+  height: 40px;
+  margin-left: auto;
+  padding: 9px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--mz-muted);
+}
+
+.drawer-close:hover {
+  background: var(--mz-card-soft);
+  color: var(--mz-text);
+}
+
+/* One restrained motion language across the app. */
+.app-shell main,
+.app-shell.is-phone-viewport main {
+  animation: workspace-in var(--motion-standard) var(--ease-standard) both;
+}
+
+.screen,
+.app-shell.is-phone-viewport .screen,
+.week-event,
+.day-event,
+.grade-group,
+.news-card,
+.finance-record-card {
+  animation: none;
+}
+
+.primary-navigation-item,
+.primary-navigation-icon,
+.icon-btn,
+.tile,
+.drawer-item,
+.grade-group,
+.news-card,
+.link-card {
+  transition:
+    background-color var(--motion-fast) linear,
+    border-color var(--motion-fast) linear,
+    color var(--motion-fast) linear;
+}
+
+.primary-navigation-item:active .primary-navigation-icon,
+.icon-btn:active,
+.tile:active,
+.drawer-item:active {
+  transform: translateY(1px);
+}
+
+.plan-overflow-menu {
+  transform-origin: top right;
+  animation: popover-in 150ms var(--ease-standard) both;
+}
+
+.toast {
+  animation: toast-in-clean var(--motion-standard) var(--ease-emphasized) both;
+}
+
+.banner {
+  animation: notice-in var(--motion-standard) var(--ease-standard) both;
+}
+
+.appbar-filter-chip-wrapper,
+.plan-active-filters-bar,
+.spinner-wrap,
+.empty-state,
+.login-header,
+.login-card {
+  animation: notice-in var(--motion-standard) var(--ease-standard) both;
+  animation-delay: 0ms;
+}
+
+.install-tip-card,
+.ios-inst-card {
+  animation: panel-up var(--motion-panel) var(--ease-standard) both;
+}
+
+.news-gallery-track.is-settling {
+  transition: transform 190ms var(--ease-standard);
+}
+
+.news-gallery-track .news-gallery-image {
+  transform: none;
+  transition: opacity var(--motion-standard) linear;
+}
+
+.grade-group-items-wrap {
+  transition: grid-template-rows 220ms var(--ease-standard), opacity 150ms linear;
+}
+
+.drawer-backdrop,
+.app-shell.is-phone-viewport .drawer-backdrop {
+  transition: opacity var(--motion-standard) linear;
+}
+
+.drawer-panel,
+.app-shell.is-phone-viewport .drawer-panel {
+  transition: transform var(--motion-panel) var(--ease-standard), opacity var(--motion-standard) linear;
+}
+
+.plan-event-sheet,
+.plan-search-sheet,
+.plan-filters-sheet {
+  transition: transform var(--motion-panel) var(--ease-standard), opacity var(--motion-standard) linear;
+}
+
+@keyframes workspace-in {
+  from { opacity: 0; transform: translateX(6px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes popover-in {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes toast-in-clean {
+  from { opacity: 0; transform: translate(-50%, 6px); }
+  to { opacity: 1; transform: translate(-50%, 0); }
+}
+
+@keyframes notice-in {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes panel-up {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@media (min-width: 900px), (min-width: 700px) and (orientation: landscape) {
+  :root {
+    --desktop-sidebar-w: 88px;
+  }
+
+  .app-shell.is-plan,
+  .app-shell.is-plan.is-phone-viewport,
+  .app-shell.is-plan.is-phone-scale-fix {
+    grid-template: 74px minmax(0, 1fr) / var(--desktop-sidebar-w) minmax(0, 1fr);
+  }
+
+  .android-appbar,
+  .app-shell.is-phone-viewport .android-appbar {
+    border-bottom: 1px solid var(--mz-border-soft);
+  }
+
+  .plan-appbar,
+  .app-shell.is-phone-viewport .plan-appbar {
+    grid-template: 1fr / minmax(260px, 1fr) auto minmax(260px, 1fr);
+    align-items: center;
+    height: 74px;
+    min-height: 74px;
+    padding: 10px 22px;
+  }
+
+  .plan-appbar-heading {
+    grid-column: 1;
+  }
+
+  .plan-appbar .plan-appbar-heading h1 {
+    font-size: 30px;
+  }
+
+  .plan-appbar-range {
+    grid-column: 2;
+    font-size: 18px;
+    text-align: center;
+  }
+
+  .plan-appbar .appbar-actions {
+    grid-column: 3;
+    justify-self: end;
+  }
+
+  .plan-appbar .icon-btn {
+    width: 40px;
+    min-width: 40px;
+    height: 40px;
+    padding: 8px;
+  }
+
+  .primary-navigation {
+    grid-template: repeat(5, 68px) / 1fr;
+    align-content: start;
+    gap: 4px;
+    padding: 90px 8px 12px;
+  }
+
+  .primary-navigation-item {
+    position: relative;
+    grid-template-rows: 34px 18px;
+    min-height: 64px;
+    border-radius: 8px;
+  }
+
+  .primary-navigation-item.is-active::before {
+    position: absolute;
+    top: 13px;
+    bottom: 13px;
+    left: -8px;
+    width: 3px;
+    background: var(--mz-primary);
+    content: '';
+  }
+
+  .primary-navigation-item.is-active {
+    background: var(--mz-card-soft);
+  }
+
+  .primary-navigation-item.is-active .primary-navigation-icon {
+    background: transparent;
+  }
+
+  .plan-screen,
+  .app-shell.is-phone-viewport .plan-screen {
+    grid-template: minmax(0, 1fr) / 248px minmax(0, 1fr);
+    gap: 16px;
+    width: min(100%, 1500px);
+    margin-inline: auto;
+    padding: 16px 22px 20px;
+  }
+
+  .plan-control-pane,
+  .app-shell.is-phone-viewport .plan-control-pane {
+    display: grid;
+    align-content: start;
+    gap: 12px;
+    padding: 14px;
+  }
+
+  .plan-control-pane .plan-sticky-header {
+    display: grid;
+    grid-template-columns: 32px minmax(0, 1fr) 32px;
+    gap: 4px;
+    padding: 0;
+  }
+
+  .plan-control-pane .plan-nav-btn-compact {
+    width: 32px;
+    height: 36px;
+  }
+
+  .plan-control-pane .plan-nav-btn-compact svg {
+    width: 20px;
+    height: 20px;
+    transform: none;
+  }
+
+  .plan-control-pane .plan-date-label-compact {
+    font-size: 16px;
+  }
+
+  .plan-content {
+    border: 1px solid var(--mz-border-soft);
+    border-radius: 8px;
+    background: var(--mz-surface);
+  }
+
+  .week-card,
+  .day-tl-card,
+  .month-shell {
+    border-radius: 7px;
+  }
+
+  .app-drawer,
+  .app-shell.is-phone-viewport .app-drawer {
+    inset: 86px 14px 14px auto;
+    width: 360px;
+    height: auto;
+    visibility: hidden;
+    pointer-events: none;
+  }
+
+  .app-drawer.open,
+  .app-shell.is-phone-viewport .app-drawer.open {
+    visibility: visible;
+    pointer-events: none;
+  }
+
+  .app-drawer .drawer-backdrop,
+  .app-shell.is-phone-viewport .app-drawer .drawer-backdrop {
+    display: none;
+  }
+
+  .drawer-panel,
+  .app-shell.is-phone-viewport .drawer-panel {
+    inset: 0;
+    width: 100%;
+    max-height: none;
+    padding: 16px;
+    border: 1px solid var(--mz-border-soft);
+    border-radius: 8px;
+    background: color-mix(in srgb, var(--mz-surface) 96%, transparent);
+    box-shadow: 0 18px 50px rgb(0 0 0 / 34%);
+    opacity: 0;
+    pointer-events: auto;
+    transform: translateX(24px);
+  }
+
+  .app-drawer.open .drawer-panel,
+  .app-shell.is-phone-viewport .app-drawer.open .drawer-panel {
+    opacity: 1;
+    transform: translateX(0);
+  }
+
+  .drawer-header-title {
+    font-size: 24px;
+  }
+}
+
+@media (min-width: 700px) and (max-width: 899px) and (orientation: landscape) and (max-height: 700px) {
+  .app-shell,
+  .app-shell.is-phone-viewport,
+  .app-shell.is-phone-viewport.is-phone-scale-fix,
+  .app-shell.is-plan {
+    --primary-nav-h: 64px;
+    grid-template: 68px minmax(0, 1fr) var(--primary-nav-h) / minmax(0, 1fr);
+  }
+
+  .app-shell .android-appbar {
+    grid-row: 1;
+    grid-column: 1;
+  }
+
+  .app-shell main {
+    grid-row: 2;
+    grid-column: 1;
+  }
+
+  .app-shell .primary-navigation {
+    grid-row: 3;
+    grid-column: 1;
+    grid-template: 1fr / repeat(5, minmax(0, 1fr));
+    align-content: stretch;
+    gap: 0;
+    width: 100%;
+    height: var(--primary-nav-h);
+    padding: 3px max(8px, env(safe-area-inset-right)) max(3px, env(safe-area-inset-bottom)) max(8px, env(safe-area-inset-left));
+    border-top: 1px solid var(--mz-border-soft);
+    border-right: 0;
+  }
+
+  .app-shell .primary-navigation-item {
+    grid-template-rows: 32px 18px;
+    min-height: 56px;
+    border-radius: 0;
+  }
+
+  .app-shell .primary-navigation-item.is-active::before {
+    display: none;
+  }
+
+  .app-shell .primary-navigation-item.is-active {
+    background: transparent;
+  }
+
+  .app-shell .primary-navigation-item.is-active .primary-navigation-icon {
+    background: var(--mz-card-soft);
+  }
+
+  .app-shell .plan-appbar {
+    grid-template: 1fr / minmax(220px, 1fr) auto minmax(220px, 1fr);
+    height: 68px;
+    min-height: 68px;
+    padding: 7px 14px 7px 18px;
+  }
+
+  .app-shell .plan-appbar .plan-appbar-heading h1 {
+    font-size: 25px;
+  }
+
+  .app-shell .plan-appbar-heading > span {
+    margin-top: 3px;
+    font-size: 10px;
+  }
+
+  .app-shell .plan-screen {
+    grid-template: minmax(0, 1fr) / 220px minmax(0, 1fr);
+    gap: 10px;
+    width: 100%;
+    padding: 8px 12px;
+  }
+
+  .app-shell .plan-control-pane {
+    padding: 10px;
+    overflow: auto;
+    scrollbar-color: var(--mz-border) transparent;
+    scrollbar-width: thin;
+  }
+
+  .app-shell .plan-control-pane .plan-date-label-compact {
+    font-size: 14px;
   }
 }

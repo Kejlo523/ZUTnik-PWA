@@ -224,6 +224,7 @@ export interface PlanEventUi {
   tooltip: string;
   typeClass: string;
   typeLabel: string;
+  typeCode?: string;
   subjectKey: string;
   teacher: string;
 }

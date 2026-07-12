@@ -380,7 +380,7 @@ export function initials(name: string): string {
 }
 
 export function planCacheKey(viewMode: ViewMode, date: string, studyId: string | null | undefined): string {
-  return `${viewMode}_${date}_${studyId ?? 'nostudy'}`;
+  return `v2_${viewMode}_${date}_${studyId ?? 'nostudy'}`;
 }
 
 export function sumUniqueEcts(items: Grade[]): number {

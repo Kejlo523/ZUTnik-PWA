@@ -734,7 +734,11 @@ function eventTypeClass(event: Record<string, string>): string {
   const subject = normalizePlanFilterString(event.subject || event.title);
   const hay = `${form} ${subject}`;
 
+  if (status === 'e') return 'exam';
+  if (status === 'ez') return 'exam-remote';
   if (status === 'o') return 'cancelled';
+  if (status === 'r') return 'rector';
+  if (status === 'dz') return 'dean';
   if (status === 'zz') return 'remote';
   if (hay.includes('laboratorium') || hay.includes('laboratory') || form.includes(' lab') || short === 'l' || short.includes('lab')) return 'lab';
   if (hay.includes('audytoryjne') || hay.includes('auditory') || hay.includes('auditorium') || hay.includes('cwiczen') || short === 'a' || short === 'cw' || short.includes('aud')) return 'auditory';
@@ -749,8 +753,20 @@ function eventTypeClass(event: Record<string, string>): string {
   if (hay.includes('konwersatorium') || short === 'k') return 'conservatory';
   if (hay.includes('konsultacje')) return 'consultation';
   if (hay.includes('terenowe')) return 'field';
-  if (status === 'e') return 'exam';
   return 'class';
+}
+
+function eventTypeCode(event: Record<string, string>): string {
+  const short = normalizePlanFilterString(event.lessonFormShort);
+  const form = normalizePlanFilterString(event.lessonForm);
+  if (short === 'w' || form.includes('wyklad') || form.includes('lecture')) return 'W';
+  if (short === 'l' || short === 'lb' || form.includes('laborator')) return 'L';
+  if (short === 'a' || short === 'cw' || form.includes('audytory') || form.includes('cwiczen')) return 'A';
+  if (short === 'le' || short === 'lek' || form.includes('lektorat')) return 'Lek';
+  if (short === 'p' || form.includes('projekt')) return 'P';
+  if (short === 's' || form.includes('seminar')) return 'S';
+  if (short) return short.toLocaleUpperCase('pl');
+  return '';
 }
 
 function eventTypeLabel(typeClass: string, event: Record<string, string>): string {
@@ -884,6 +900,7 @@ function buildPlanDayColumns(
         tooltip: firstNonEmpty(event.description, event.subject, event.title),
         typeClass,
         typeLabel: eventTypeLabel(typeClass, event),
+        typeCode: eventTypeCode(event),
         subjectKey: firstNonEmpty(event.subject, event.title),
         teacher: firstNonEmpty(event.workerTitle, event.worker),
       };

@@ -6,6 +6,7 @@ interface AppNavigationProps {
   screen: ScreenKey;
   t: TranslateFn;
   openScreen: (screen: DrawerScreenKey) => void;
+  moreOpen: boolean;
   onMore: () => void;
 }
 
@@ -16,7 +17,7 @@ const PRIMARY_ITEMS = [
   { key: 'grades' as const, icon: 'grade', labelKey: 'nav.grades' },
 ];
 
-export function AppNavigation({ screen, t, openScreen, onMore }: AppNavigationProps) {
+export function AppNavigation({ screen, t, openScreen, moreOpen, onMore }: AppNavigationProps) {
   const primaryActive = PRIMARY_ITEMS.some((item) => item.key === screen);
 
   return (
@@ -40,9 +41,9 @@ export function AppNavigation({ screen, t, openScreen, onMore }: AppNavigationPr
 
       <button
         type="button"
-        className={`primary-navigation-item${primaryActive ? '' : ' is-active'}`}
+        className={`primary-navigation-item${moreOpen || !primaryActive ? ' is-active' : ''}`}
         onClick={onMore}
-        aria-expanded={undefined}
+        aria-expanded={moreOpen}
         title={t('nav.more')}
       >
         <span className="primary-navigation-icon"><Ic n="more" /></span>

@@ -111,6 +111,13 @@ const PHONE_VIEWPORT_MAX_SIDE = 700;
 const PHONE_VIEWPORT_SCALE_FIX_RATIO = 1.35;
 const PHONE_VIEWPORT_MAX_SCALE_FIX = 3;
 
+function formatPlanUpdatedAt(timestamp: number, language: AppSettings['language']): string {
+  if (!timestamp) return language === 'en' ? 'Saved locally' : 'Dane zapisane lokalnie';
+  const locale = language === 'en' ? 'en-GB' : 'pl-PL';
+  const date = new Intl.DateTimeFormat(locale, { day: 'numeric', month: 'long' }).format(new Date(timestamp));
+  return language === 'en' ? `Updated ${date}` : `Odświeżono ${date}`;
+}
+
 function ScreenChunkFallback() {
   return (
     <section className="screen screen-chunk-fallback" aria-busy="true">
@@ -391,6 +398,7 @@ function App() {
   const [planDate, setPlanDate] = useState(todayYmd);
   const [planResult, setPlanResult] = useState<PlanResult | null>(null);
   const [planLoading, setPlanLoading] = useState(false);
+  const [planUpdatedAt, setPlanUpdatedAt] = useState(0);
   const [planSearchOpen, setPlanSearchOpen] = useState(false);
   const [planFiltersOpen, setPlanFiltersOpen] = useState(false);
   const [planMoreMenuOpen, setPlanMoreMenuOpen] = useState(false);
@@ -1077,6 +1085,7 @@ function App() {
       if (freshCachedPlan) {
         setGlobalError('');
         setPlanResult(freshCachedPlan);
+        setPlanUpdatedAt(cache.loadPlanTimestamp(cacheKey));
         hydratePlanHiddenSubjects(freshCachedPlan.debug.album || '', requestId);
         setPlanLoading(false);
         return;
@@ -1106,6 +1115,7 @@ function App() {
       if (cached) {
         hasCached = true;
         setPlanResult(cached);
+        setPlanUpdatedAt(cache.loadPlanTimestamp(cacheKey));
         hydratePlanHiddenSubjects(cached.debug.album || '', requestId);
       }
       // Task 7: Reuse week cache for day view
@@ -1160,6 +1170,7 @@ function App() {
       });
       if (!isSearch) cache.savePlan(cacheKey, result);
       setPlanResult(result);
+      setPlanUpdatedAt(Date.now());
       hydratePlanHiddenSubjects(result.debug.album || '', requestId);
       if (!isSearch && result.currentDate && !newDate) setPlanDate(result.currentDate);
     } catch (e) {
@@ -1525,6 +1536,7 @@ function App() {
     setCalendarEvents([]);
     setCredits(null);
     setPlanResult(null);
+    setPlanUpdatedAt(0);
     setSelectedPlanEvent(null);
 
     if (screen === 'plan') void loadPlanData();
@@ -1767,20 +1779,14 @@ function App() {
   }, [planResult, hiddenPlanSubjectKeys]);
 
   const weekLayout = useMemo(() => {
-    let minS = Infinity, maxE = 0;
-    for (const col of visiblePlanResult?.dayColumns ?? []) {
-      for (const ev of col.events) { minS = Math.min(minS, ev.startMin); maxE = Math.max(maxE, ev.endMin); }
-    }
-    const s0 = Number.isFinite(minS) ? minS : 7 * 60;
-    const e0 = maxE > 0 ? maxE : 17 * 60;
-    const startMin = Math.min(6 * 60, Math.floor((s0 - 30) / 60) * 60);
-    const endMin = Math.max(18 * 60, Math.min(23 * 60, Math.ceil((e0 + 30) / 60) * 60));
-    const hh = settings.compactPlan ? 44 : 56;
+    const startMin = 6 * 60;
+    const endMin = 22 * 60;
+    const hh = settings.compactPlan ? 40 : 48;
     const slots: number[] = [];
     for (let m = startMin; m < endMin; m += 60) slots.push(m);
     if (!slots.length) slots.push(startMin);
     return { startMin, endMin, hourHeight: hh, slots };
-  }, [visiblePlanResult?.dayColumns, settings.compactPlan]);
+  }, [settings.compactPlan]);
 
   const weekVisibleColumns = useMemo(() => {
     const cols = visiblePlanResult?.dayColumns ?? [];
@@ -1922,17 +1928,17 @@ function App() {
   const moreDrawerItems = drawerItems.filter((item) => !['home', 'plan', 'info', 'grades'].includes(item.key));
 
   // ── Plan carousel animation helpers ─────────────────────────────────────────
-  function applyCarouselTransform(x: number, animated: boolean, duration = 240) {
+  function applyCarouselTransform(x: number, animated: boolean, duration = 190) {
     const el = carouselRef.current;
     if (!el) return;
-    el.style.transition = animated ? `transform ${duration}ms cubic-bezier(0.25,0.46,0.45,0.94)` : 'none';
+    el.style.transition = animated ? `transform ${duration}ms cubic-bezier(.2,0,0,1)` : 'none';
     el.style.transform = x === 0 ? '' : `translateX(${x}px)`;
   }
 
   function commitPlanNavigate(targetDate: string, exitRight: boolean) {
     const exitX = exitRight ? window.innerWidth : -window.innerWidth;
     const enterX = -exitX;
-    applyCarouselTransform(exitX, true, 200);
+    applyCarouselTransform(exitX, true, 170);
     setTimeout(() => {
       if (carouselRef.current) {
         carouselRef.current.style.transition = 'none';
@@ -1941,8 +1947,8 @@ function App() {
       const isSearch = !!(planSearchQ?.trim());
       if (isSearch) void loadPlanData({ category: planSearchCat, query: planSearchQ.trim() }, false, targetDate);
       else setPlanDate(targetDate);
-      requestAnimationFrame(() => requestAnimationFrame(() => applyCarouselTransform(0, true, 220)));
-    }, 215);
+      requestAnimationFrame(() => requestAnimationFrame(() => applyCarouselTransform(0, true, 190)));
+    }, 180);
   }
 
   // ── Plan touch swipe handlers ─────────────────────────────────────────────
@@ -2415,7 +2421,7 @@ function App() {
                                           >
                                             <div className="day-event-title">{ev.title}</div>
                                             <div className="day-event-meta">{ev.startStr}-{ev.endStr} · {ev.room}{ev.group ? ` · ${ev.group}` : ''}</div>
-                                            <div className="plan-event-type">({planTypeShort(ev.typeClass, ev.typeLabel)})</div>
+                                            <div className="plan-event-type">({ev.typeCode || planTypeShort(ev.typeClass, ev.typeLabel)})</div>
                                           </div>
                                         );
                                       })
@@ -2518,7 +2524,8 @@ function App() {
                                             title={`${ev.startStr} - ${ev.endStr} ${ev.title}`}
                                           >
                                             <div className="week-event-time">
-                                              {ev.startStr}-{ev.endStr}
+                                              <span className="event-time-full">{ev.startStr}-{ev.endStr}</span>
+                                              <span className="event-time-start">{ev.startStr}</span>
                                             </div>
                                             {(ev.room || ev.group) && (
                                               <div className="week-event-context">
@@ -2526,7 +2533,7 @@ function App() {
                                               </div>
                                             )}
                                             <div className="week-event-title">{ev.title}</div>
-                                            <div className="plan-event-type">({planTypeShort(ev.typeClass, ev.typeLabel)})</div>
+                                            <div className="plan-event-type">({ev.typeCode || planTypeShort(ev.typeClass, ev.typeLabel)})</div>
                                           </div>
                                         );
                                       })
@@ -2961,7 +2968,7 @@ function App() {
 
   return (
     <div
-      className={`app-shell${screen === 'login' ? ' is-login' : ''}${phoneViewportClass}`}
+      className={`app-shell${screen === 'login' ? ' is-login' : ''}${screen === 'plan' ? ' is-plan' : ''}${drawerOpen ? ' has-more-open' : ''}${phoneViewportClass}`}
       onTouchStart={swipe.onTouchStart}
       onTouchMove={swipe.onTouchMove}
       onTouchEnd={swipe.onTouchEnd}
@@ -2969,13 +2976,24 @@ function App() {
     >
       {/* AppBar */}
       {screen !== 'login' && (
-        <header className="android-appbar">
-          <button type="button" className={`icon-btn appbar-nav-btn${screen === 'news-detail' ? ' is-back' : ''}`} onClick={screen === 'news-detail' ? nav.goBack : onNavIcon} aria-label={screen === 'news-detail' ? t('general.back') : t('general.openMenu')}>
-            <Ic n={screen === 'news-detail' ? 'back' : 'menu'} />
-          </button>
-          <h1>{t(SCREEN_I18N_KEY[screen])}</h1>
-          {renderAppBarActions()}
-        </header>
+        screen === 'plan' ? (
+          <header className="android-appbar plan-appbar">
+            <div className="plan-appbar-heading">
+              <h1>{t(SCREEN_I18N_KEY[screen])}</h1>
+              <span>{formatPlanUpdatedAt(planUpdatedAt, settings.language)}</span>
+            </div>
+            <div className="plan-appbar-range">{visiblePlanResult?.headerLabel || planDate}</div>
+            {renderAppBarActions()}
+          </header>
+        ) : (
+          <header className="android-appbar">
+            <button type="button" className={`icon-btn appbar-nav-btn${screen === 'news-detail' ? ' is-back' : ''}`} onClick={screen === 'news-detail' ? nav.goBack : onNavIcon} aria-label={screen === 'news-detail' ? t('general.back') : t('general.openMenu')}>
+              <Ic n={screen === 'news-detail' ? 'back' : 'menu'} />
+            </button>
+            <h1>{t(SCREEN_I18N_KEY[screen])}</h1>
+            {renderAppBarActions()}
+          </header>
+        )
       )}
 
       {/* Global loading / error banners */}
@@ -3016,7 +3034,8 @@ function App() {
           screen={screen}
           t={t}
           openScreen={openScreen}
-          onMore={() => setDrawerOpen(true)}
+          moreOpen={drawerOpen}
+          onMore={() => setDrawerOpen((open) => !open)}
         />
       )}
 
@@ -3093,6 +3112,9 @@ function App() {
                 <div className="drawer-header-title">{t('nav.more')}</div>
                 <div className="drawer-header-user">ZUTnik PWA</div>
               </div>
+              <button type="button" className="drawer-close" onClick={() => setDrawerOpen(false)} aria-label={t('general.closeMenu')}>
+                <Ic n="x" />
+              </button>
             </div>
 
             <div className="drawer-divider" />

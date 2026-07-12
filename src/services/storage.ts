@@ -198,6 +198,17 @@ function loadCForce<T>(key: string): T | null {
   }
 }
 
+function loadCTimestamp(key: string): number {
+  try {
+    const raw = window.localStorage.getItem(key);
+    if (!raw) return 0;
+    const entry = JSON.parse(raw) as CacheEntry<unknown>;
+    return Number.isFinite(entry.ts) ? entry.ts : 0;
+  } catch {
+    return 0;
+  }
+}
+
 export const cache = {
   // Studies
   saveStudies: (data: Study[]) => saveC(ck('studies'), data),
@@ -236,6 +247,7 @@ export const cache = {
   savePlan: (key: string, data: PlanResult) => saveC(ck('plan', key), data),
   loadPlan: (key: string): PlanResult | null => loadC(ck('plan', key), TTL_MS.plan),
   loadPlanForce: (key: string): PlanResult | null => loadCForce(ck('plan', key)),
+  loadPlanTimestamp: (key: string): number => loadCTimestamp(ck('plan', key)),
 
   // News
   saveNews: (data: NewsItem[]) => saveC(ck('news'), data),

@@ -563,8 +563,7 @@ textarea:focus-visible {
   background: transparent;
 }
 
-.plan-sticky-header,
-.app-shell.is-phone-viewport .plan-sticky-header {
+.plan-sticky-header {
   display: grid;
   grid-template-columns: 42px minmax(0, 1fr) 42px;
   align-items: center;
@@ -655,12 +654,15 @@ textarea:focus-visible {
 
 .plan-carousel-track {
   min-width: 0;
+  flex: 0 0 auto;
+  min-height: auto;
+  touch-action: pan-y;
 }
 
 .week-card,
 .day-tl-card,
 .month-shell {
-  overflow: hidden;
+  overflow: visible;
   border: 0;
   border-radius: 8px 8px 0 0;
   background: var(--mz-surface);
@@ -1981,7 +1983,8 @@ textarea:focus-visible {
   padding: 4px 18px 8px;
 }
 
-.plan-control-pane .plan-sticky-header {
+.app-shell.is-plan .plan-control-pane .plan-sticky-header,
+.app-shell.is-plan.is-phone-viewport .plan-control-pane .plan-sticky-header {
   display: none;
 }
 
@@ -1999,7 +2002,7 @@ textarea:focus-visible {
 .plan-content,
 .app-shell.is-phone-viewport .plan-content {
   min-height: 0;
-  overflow: auto;
+  overflow: hidden;
   scrollbar-gutter: stable;
 }
 
@@ -2511,37 +2514,50 @@ textarea:focus-visible {
 /* Mobile plan uses one native vertical scroller; horizontal paging stays on the track. */
 .app-shell.is-plan main,
 .app-shell.is-plan.is-phone-viewport main {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
   min-height: 0;
   overflow: hidden;
 }
 
 .app-shell.is-plan .plan-screen,
 .app-shell.is-plan.is-phone-viewport .plan-screen {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
   min-height: 0;
+  max-height: 100%;
   overflow: hidden;
 }
 
 .app-shell.is-plan .plan-content,
 .app-shell.is-plan.is-phone-viewport .plan-content {
   display: flex;
+  flex: 1 1 auto;
   flex-direction: column;
   height: 100%;
   min-height: 0;
+  max-height: 100%;
   overflow: hidden;
 }
 
 .app-shell.is-plan .plan-content-surface,
 .app-shell.is-plan.is-phone-viewport .plan-content-surface {
+  display: flex;
   flex: 1 1 auto;
-  height: 100%;
+  flex-direction: column;
+  height: auto;
   min-height: 0;
+  max-height: 100%;
   overflow: hidden;
 }
 
 .app-shell.is-plan .plan-container,
 .app-shell.is-plan.is-phone-viewport .plan-container {
-  height: 100%;
+  flex: 1 1 auto;
+  height: auto;
   min-height: 0;
+  max-height: 100%;
   overflow-x: hidden;
   overflow-y: auto;
   overscroll-behavior-y: contain;
@@ -2549,8 +2565,22 @@ textarea:focus-visible {
   -webkit-overflow-scrolling: touch;
 }
 
+.app-shell.is-plan .plan-legend-bottom,
+.app-shell.is-plan.is-phone-viewport .plan-legend-bottom {
+  flex: 0 0 auto;
+}
+
 .plan-carousel-track {
   touch-action: pan-y;
+  transform: translateZ(0);
+}
+
+.app-shell.is-plan .week-card,
+.app-shell.is-plan.is-phone-viewport .week-card,
+.app-shell.is-plan .day-tl-card,
+.app-shell.is-plan.is-phone-viewport .day-tl-card {
+  -webkit-font-smoothing: antialiased;
+  text-rendering: geometricPrecision;
 }
 
 .plan-legend-summary {

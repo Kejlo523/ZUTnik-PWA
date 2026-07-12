@@ -22,17 +22,16 @@ function escapeRegex(value: string): string {
 
 const scopedApiPrefix = appBase === '/' ? '/api/' : `${appBaseNoSlash}/api/`;
 const scopedStatsApiPrefix = `${scopedApiPrefix}stats`;
+// Workbox serializes runtimeCaching urlPattern functions without closure scope.
+// Use RegExp literals here so sw.js does not reference undefined globals.
 const apiRuntimePattern = new RegExp(`^https?://[^/]+(${escapeRegex(scopedApiPrefix)}|/api/)`);
+const globalStatsApiRuntimePattern = /^https?:\/\/[^/]+\/api\/stats(?:\/|$|\?)/;
+const scopedStatsApiRuntimePattern = new RegExp(
+  `^https?://[^/]+${escapeRegex(scopedStatsApiPrefix.replace(/\/+$/, ''))}(?:/|$|\\?)`,
+);
 const apiDenylist = appBase === '/'
   ? [/^\/api\//, /^\/stats\/?$/]
   : [new RegExp(`^${escapeRegex(scopedApiPrefix)}`), /^\/api\//, new RegExp(`^${escapeRegex(statsPath)}\\/?$`)];
-
-function isStatsApiPath(pathname: string): boolean {
-  return pathname === '/api/stats'
-    || pathname.startsWith('/api/stats/')
-    || pathname === scopedStatsApiPrefix.replace(/\/+$/, '')
-    || pathname.startsWith(`${scopedStatsApiPrefix}/`);
-}
 
 export default defineConfig({
   base: appBase,
@@ -98,12 +97,16 @@ export default defineConfig({
             },
           },
           {
-            urlPattern: ({ request, url }) => (
-              request.method === 'GET'
-              && apiRuntimePattern.test(url.href)
-              && !isStatsApiPath(url.pathname)
+            urlPattern: ({ url, sameOrigin }) => (
+              sameOrigin
+              && (globalStatsApiRuntimePattern.test(url.href) || scopedStatsApiRuntimePattern.test(url.href))
             ),
+            handler: 'NetworkOnly',
+          },
+          {
+            urlPattern: apiRuntimePattern,
             handler: 'NetworkFirst',
+            method: 'GET',
             options: {
               cacheName: 'api-cache',
               networkTimeoutSeconds: 4,

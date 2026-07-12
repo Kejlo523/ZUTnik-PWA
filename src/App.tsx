@@ -241,7 +241,9 @@ function getPhoneViewportState(): PhoneViewportState {
   const screenWidth = Math.max(1, Math.round(screenWidths.length ? Math.min(...screenWidths) : window.innerWidth));
   const layoutWidth = layoutWidths.length ? Math.max(...layoutWidths) : screenWidth;
   const rawScale = screenWidth > 0 ? layoutWidth / screenWidth : 1;
-  const isZoomedOutLayout = hasViewportScale ? viewportScale < 0.95 : layoutWidth >= 900;
+  const isZoomedOutLayout = hasViewportScale
+    ? viewportScale < 0.95
+    : layoutWidth >= 900 && layoutWidth >= screenWidth * PHONE_VIEWPORT_SCALE_FIX_RATIO;
   const needsScaleFix = isPhone && rawScale >= PHONE_VIEWPORT_SCALE_FIX_RATIO && isZoomedOutLayout;
   const scaleSource = hasViewportScale ? 1 / viewportScale : rawScale;
   const scale = needsScaleFix ? Math.min(PHONE_VIEWPORT_MAX_SCALE_FIX, Math.round(scaleSource * 100) / 100) : 1;
@@ -1956,7 +1958,6 @@ function App() {
     if (e.touches.length !== 1) return;
     // Give priority to drawer swipe from left edge
     if (e.touches[0].clientX <= 44) return;
-    if (carouselRef.current) carouselRef.current.style.transition = 'none';
     planDragRef.current = {
       startX: e.touches[0].clientX,
       startY: e.touches[0].clientY,
@@ -1974,10 +1975,15 @@ function App() {
       const absX = Math.abs(dx);
       const absY = Math.abs(dy);
       if (absX < 10 && absY < 10) return;
-      if (absY >= absX) { planDragRef.current = null; return; }
+      if (absY > absX) {
+        planDragRef.current = null;
+        return;
+      }
       if (absX < absY * 1.2) return;
       drag.locked = true;
+      carouselRef.current.style.transition = 'none';
     }
+    e.preventDefault();
     carouselRef.current.style.transform = `translateX(${dx}px)`;
   };
 

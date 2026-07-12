@@ -18,12 +18,13 @@ interface UseSwipeOptions {
 }
 
 const INTERACTIVE_TAGS = new Set(['BUTTON', 'A', 'INPUT', 'SELECT', 'TEXTAREA', 'LABEL']);
+const EDGE_SWIPE_WIDTH = 32;
 
 function isInteractiveTarget(el: EventTarget | null): boolean {
   if (!el || !(el instanceof Element)) return false;
   const node = el as Element;
   if (node.classList.contains('drawer-backdrop')) return false;
-  if (node.closest('.plan-carousel-track')) return false;
+  if (node.closest('.plan-carousel-track')) return true;
   if (INTERACTIVE_TAGS.has(node.tagName)) return true;
   if (node.getAttribute('role') === 'button') return true;
   return false;
@@ -38,9 +39,10 @@ export function useSwipeGestures({ canGoBack, onBack, canOpenDrawer, onOpenDrawe
     if (e.touches.length !== 1) return;
 
     const x = e.touches[0].clientX;
-    const fromEdge = x <= window.innerWidth / 2;
+    const fromEdge = x <= EDGE_SWIPE_WIDTH;
 
-    // Only block interactions for non-edge swipes
+    // Components such as the plan own their gestures. The narrow left edge stays
+    // available for opening the drawer without stealing normal scrolling.
     if (!fromEdge && isInteractiveTarget(e.target)) {
       blocked.current = true;
       return;
@@ -74,15 +76,14 @@ export function useSwipeGestures({ canGoBack, onBack, canOpenDrawer, onOpenDrawe
       return;
     }
 
-    // Swipe right from left edge → open drawer 
-    // Relaxed requirement: dx > 40 and origX <= window.innerWidth / 2
-    if (origX <= window.innerWidth / 2 && dx > 40 && canOpenDrawer) {
+    // Swipe right from the system-style left edge to open the drawer.
+    if (origX <= EDGE_SWIPE_WIDTH && dx > 40 && canOpenDrawer) {
       onOpenDrawer();
       return;
     }
 
     // Swipe right (back) from very left edge
-    if (dx > 80 && dy < 70 && origX <= 80 && canGoBack) {
+    if (dx > 80 && dy < 70 && origX <= EDGE_SWIPE_WIDTH && canGoBack) {
       onBack();
     }
   }, [canCloseDrawer, canGoBack, canOpenDrawer, onBack, onCloseDrawer, onOpenDrawer]);

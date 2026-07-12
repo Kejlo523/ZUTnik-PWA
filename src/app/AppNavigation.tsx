@@ -23,7 +23,7 @@ export function AppNavigation({ screen, t, openScreen, moreOpen, onMore }: AppNa
   return (
     <nav className="primary-navigation" aria-label={t('nav.label')}>
       {PRIMARY_ITEMS.map((item) => {
-        const active = screen === item.key;
+        const active = screen === item.key && !moreOpen;
         return (
           <button
             key={item.key}
@@ -44,6 +44,7 @@ export function AppNavigation({ screen, t, openScreen, moreOpen, onMore }: AppNa
         className={`primary-navigation-item${moreOpen || !primaryActive ? ' is-active' : ''}`}
         onClick={onMore}
         aria-expanded={moreOpen}
+        aria-current={!primaryActive && !moreOpen ? 'page' : undefined}
         title={t('nav.more')}
       >
         <span className="primary-navigation-icon"><Ic n="more" /></span>

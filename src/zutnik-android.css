@@ -53,7 +53,7 @@
   --ev-consultation: #625953;
   --ev-field: #5c7044;
   --appbar-h: 76px;
-  --primary-nav-h: 76px;
+  --primary-nav-h: calc(70px + env(safe-area-inset-bottom, 0px));
   --desktop-sidebar-w: 78px;
   --r-card: 8px;
   --r-inner: 6px;
@@ -2505,5 +2505,155 @@ textarea:focus-visible {
 
   .app-shell .plan-control-pane .plan-date-label-compact {
     font-size: 14px;
+  }
+}
+
+/* Mobile plan uses one native vertical scroller; horizontal paging stays on the track. */
+.app-shell.is-plan main,
+.app-shell.is-plan.is-phone-viewport main {
+  min-height: 0;
+  overflow: hidden;
+}
+
+.app-shell.is-plan .plan-screen,
+.app-shell.is-plan.is-phone-viewport .plan-screen {
+  min-height: 0;
+  overflow: hidden;
+}
+
+.app-shell.is-plan .plan-content,
+.app-shell.is-plan.is-phone-viewport .plan-content {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.app-shell.is-plan .plan-content-surface,
+.app-shell.is-plan.is-phone-viewport .plan-content-surface {
+  flex: 1 1 auto;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.app-shell.is-plan .plan-container,
+.app-shell.is-plan.is-phone-viewport .plan-container {
+  height: 100%;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+  touch-action: pan-y;
+  -webkit-overflow-scrolling: touch;
+}
+
+.plan-carousel-track {
+  touch-action: pan-y;
+}
+
+.plan-legend-summary {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto 24px;
+  align-items: center;
+  min-height: 44px;
+  padding: 0 14px;
+  color: var(--mz-text);
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  list-style: none;
+}
+
+.plan-legend-summary::-webkit-details-marker {
+  display: none;
+}
+
+.plan-legend-count {
+  display: grid;
+  place-items: center;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--mz-card-soft);
+  color: var(--mz-muted);
+  font-family: var(--font-data);
+  font-size: 10px;
+}
+
+.plan-legend-chevron {
+  display: grid;
+  place-items: center;
+  color: var(--mz-muted);
+  transition: transform var(--motion-fast) linear;
+}
+
+.plan-legend-chevron svg {
+  width: 16px;
+  height: 16px;
+}
+
+.plan-legend-bottom[open] .plan-legend-chevron {
+  transform: rotate(90deg);
+}
+
+.plan-legend-body {
+  max-height: min(34dvh, 280px);
+  padding: 4px 0 12px;
+  overflow-y: auto;
+  border-top: 1px solid var(--mz-border-soft);
+}
+
+@media (max-width: 699px) {
+  .app-shell,
+  .app-shell.is-phone-viewport,
+  .app-shell.is-phone-viewport.is-phone-scale-fix {
+    --primary-nav-h: calc(70px + env(safe-area-inset-bottom, 0px));
+  }
+
+  .primary-navigation,
+  .app-shell.is-phone-viewport .primary-navigation {
+    height: var(--primary-nav-h);
+    min-height: var(--primary-nav-h);
+    padding: 4px max(6px, env(safe-area-inset-right)) max(4px, env(safe-area-inset-bottom)) max(6px, env(safe-area-inset-left));
+    overflow: hidden;
+  }
+
+  .primary-navigation-item,
+  .app-shell.is-phone-viewport .primary-navigation-item {
+    grid-template-rows: 32px 18px;
+    min-height: 0;
+    height: 100%;
+    padding: 2px;
+  }
+
+  .primary-navigation-icon,
+  .app-shell.is-phone-viewport .primary-navigation-icon {
+    width: 48px;
+    height: 30px;
+  }
+
+  .primary-navigation-label,
+  .app-shell.is-phone-viewport .primary-navigation-label {
+    font-size: 10px;
+    line-height: 16px;
+  }
+
+  .app-shell.is-plan .plan-legend-side,
+  .app-shell.is-plan.is-phone-viewport .plan-legend-side {
+    display: none;
+  }
+
+  .app-shell.is-plan .plan-legend-bottom,
+  .app-shell.is-plan.is-phone-viewport .plan-legend-bottom {
+    display: block;
+    flex: 0 0 auto;
+    margin: 0;
+    padding: 0;
+    border-top: 1px solid var(--mz-border-soft);
+    border-radius: 0;
+    background: var(--mz-surface);
   }
 }

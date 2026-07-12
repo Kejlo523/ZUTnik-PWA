@@ -1971,8 +1971,11 @@ function App() {
     const dx = e.touches[0].clientX - drag.startX;
     const dy = e.touches[0].clientY - drag.startY;
     if (!drag.locked) {
-      if (Math.abs(dx) < 8 && Math.abs(dy) < 8) return;
-      if (Math.abs(dy) > Math.abs(dx)) { planDragRef.current = null; return; }
+      const absX = Math.abs(dx);
+      const absY = Math.abs(dy);
+      if (absX < 10 && absY < 10) return;
+      if (absY >= absX) { planDragRef.current = null; return; }
+      if (absX < absY * 1.2) return;
       drag.locked = true;
     }
     carouselRef.current.style.transform = `translateX(${dx}px)`;
@@ -2131,10 +2134,8 @@ function App() {
 
     if (visibleEvents.length === 0 && visibleMarkers.length === 0) return null;
 
-    return (
-      <div className={`plan-legend-inline ${className}`}>
-        <div className="plan-legend-inline-title">{t('plan.legend') || 'Legenda'}</div>
-
+    const legendContent = (
+      <>
         {visibleEvents.length > 0 && (
           <>
             <div className="legend-section-title">{t('plan.eventTypes') || 'Typy zajęć'}</div>
@@ -2158,6 +2159,26 @@ function App() {
             ))}
           </>
         )}
+      </>
+    );
+
+    if (className.includes('plan-legend-bottom')) {
+      return (
+        <details className={`plan-legend-inline ${className}`}>
+          <summary className="plan-legend-summary">
+            <span>{t('plan.legend') || 'Legenda'}</span>
+            <span className="plan-legend-count">{visibleEvents.length + visibleMarkers.length}</span>
+            <span className="plan-legend-chevron" aria-hidden><Ic n="chevR" /></span>
+          </summary>
+          <div className="plan-legend-body">{legendContent}</div>
+        </details>
+      );
+    }
+
+    return (
+      <div className={`plan-legend-inline ${className}`}>
+        <div className="plan-legend-inline-title">{t('plan.legend') || 'Legenda'}</div>
+        {legendContent}
       </div>
     );
   }

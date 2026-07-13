@@ -12,7 +12,9 @@
     "preview": "vite preview",
     "start": "node server/index.mjs",
     "icons": "node scripts-generate-icons.mjs",
+    "test": "npm run test:mappers && npm run test:upstream-browser",
     "test:mappers": "node server/usos/mappers.test.mjs",
+    "test:upstream-browser": "node server/upstream-browser.test.mjs",
     "lint": "eslint ."
   },
   "dependencies": {

@@ -12,8 +12,8 @@ import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
-import { Agent } from 'undici';
 import { createStatsService } from './stats/service.mjs';
+import { createUpstreamHeaders, runWithBrowserUserAgent } from './upstream-browser.mjs';
 import {
   REQUIRED_USOS_SCOPES,
   asArray,
@@ -61,9 +61,6 @@ const STATS_ACCESS_COOKIE = 'zutnik_stats_access';
 const STATS_ACCESS_TTL_MS = 60 * 60_000;
 const STATS_ACCESS_SECRET = process.env.STATS_ACCESS_SECRET || USOS_CONSUMER_SECRET || 'zutnik-local-stats-access';
 
-const unsafeAgent = new Agent({
-  connect: { rejectUnauthorized: false },
-});
 const statsAccessLimiter = rateLimit({
   windowMs: 10 * 60_000,
   limit: 8,
@@ -79,6 +76,9 @@ app.use(cors({ origin: true, credentials: true }));
 app.set('trust proxy', 1);
 app.use(rateLimit({ windowMs: 60_000, limit: 180, standardHeaders: true, legacyHeaders: false }));
 app.use(express.json({ limit: '1mb' }));
+app.use((req, _res, next) => {
+  runWithBrowserUserAgent(req.headers['user-agent'], next);
+});
 app.use((req, _res, next) => {
   if (req.path.startsWith('/api/') && req.path !== '/api/health') {
     statsService.recordDeviceActivity(req);
@@ -302,9 +302,9 @@ async function fetchWithTimeout(url, options = {}) {
   const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
   try {
     return await fetch(url, {
-      dispatcher: unsafeAgent,
       signal: controller.signal,
       ...options,
+      headers: createUpstreamHeaders(options.headers),
     });
   } finally {
     clearTimeout(timer);
@@ -413,9 +413,7 @@ app.get('/api/proxy/plan-student', async (req, res) => {
     }
 
     const url = `${PLAN_STUDENT_BASE}?${query.toString()}`;
-    const response = await fetchWithTimeout(url, {
-      headers: { 'User-Agent': 'ZUTnik-PWA-Proxy/1.0' },
-    });
+    const response = await fetchWithTimeout(url);
 
     if (!response.ok) {
       return res.status(response.status).json({ error: `Upstream plan HTTP ${response.status}` });
@@ -437,9 +435,7 @@ app.get('/api/proxy/plan-suggest', async (req, res) => {
     }
 
     const url = `${PLAN_SUGGEST_BASE}?kind=${encodeURIComponent(kind)}&query=${encodeURIComponent(query)}`;
-    const response = await fetchWithTimeout(url, {
-      headers: { 'User-Agent': 'ZUTnik-PWA-Proxy/1.0' },
-    });
+    const response = await fetchWithTimeout(url);
 
     if (!response.ok) {
       return res.json({ data: [] });
@@ -598,7 +594,6 @@ async function fetchUsosJson(endpoint, {
     method: 'GET',
     headers: {
       'Authorization': authHeader,
-      'User-Agent': 'ZUTnik-PWA-Proxy/1.0',
     },
   });
 
@@ -1084,7 +1079,6 @@ app.get('/api/usos/request-token', async (req, res) => {
       method: 'POST',
       headers: {
         'Authorization': authHeader,
-        'User-Agent': 'ZUTnik-PWA-Proxy/1.0',
         'Content-Type': 'application/x-www-form-urlencoded'
       },
       body
@@ -1127,7 +1121,6 @@ app.post('/api/usos/access-token', async (req, res) => {
       method: 'POST',
       headers: {
         'Authorization': authHeader,
-        'User-Agent': 'ZUTnik-PWA-Proxy/1.0',
         'Content-Type': 'application/x-www-form-urlencoded'
       },
       body
@@ -1471,9 +1464,7 @@ app.post('/api/usos/photo', async (req, res) => {
       return res.status(404).json({ error: 'Brak zdjęcia w USOS.' });
     }
 
-    const response = await fetchWithTimeout(photoUrl, {
-      headers: { 'User-Agent': 'ZUTnik-PWA-Proxy/1.0' },
-    });
+    const response = await fetchWithTimeout(photoUrl);
     if (!response.ok) {
       return res.status(response.status).end();
     }
@@ -1508,9 +1499,7 @@ app.get('/api/usos/news', async (_req, res) => {
 
 app.get('/api/proxy/rss', async (_req, res) => {
   try {
-    const response = await fetchWithTimeout(RSS_URL, {
-      headers: { 'User-Agent': 'ZUTnik-PWA-Proxy/1.0' },
-    });
+    const response = await fetchWithTimeout(RSS_URL);
 
     if (!response.ok) {
       return res.status(response.status).json({ error: `Upstream RSS HTTP ${response.status}` });
@@ -1606,9 +1595,7 @@ app.get('/api/proxy/calendar', async (_req, res) => {
 
     for (const url of CALENDAR_URLS) {
       try {
-        const response = await fetchWithTimeout(url, {
-          headers: { 'User-Agent': 'ZUTnik-PWA-Proxy/1.0' },
-        });
+        const response = await fetchWithTimeout(url);
         if (!response.ok) continue;
         const html = await response.text();
         if (!html) continue;

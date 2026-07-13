@@ -1174,13 +1174,19 @@ button.outline {
 .plan-sticky-header {
   position: static;
   z-index: 1;
-  display: grid;
+  display: none;
   grid-template-columns: 44px 1fr 44px;
   align-items: center;
   gap: 8px;
   padding: 0 12px;
   flex-shrink: 0;
   background: var(--mz-bg);
+}
+
+@media (min-width: 900px) {
+  .app-shell.is-plan .plan-control-pane .plan-sticky-header {
+    display: grid;
+  }
 }
 
 .plan-nav-btn-compact {
@@ -1212,7 +1218,7 @@ button.outline {
 .plan-nav-btn-compact svg {
   width: 24px;
   height: 24px;
-  transform: scale(1.6);
+  transform: none;
 }
 
 .plan-header-center {
@@ -1393,6 +1399,28 @@ button.outline {
   -webkit-overflow-scrolling: touch;
   overscroll-behavior-y: contain;
   touch-action: pan-y;
+  scrollbar-width: thin;
+  scrollbar-color: var(--mz-border) transparent;
+}
+
+.plan-container::-webkit-scrollbar {
+  width: 8px;
+}
+
+.plan-container::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.plan-container::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--mz-border) 88%, var(--mz-card-soft));
+  background-clip: padding-box;
+}
+
+.plan-container::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in srgb, var(--mz-primary) 42%, var(--mz-border));
+  background-clip: padding-box;
 }
 
 .plan-carousel-track {

@@ -564,7 +564,6 @@ textarea:focus-visible {
 }
 
 .plan-sticky-header {
-  display: grid;
   grid-template-columns: 42px minmax(0, 1fr) 42px;
   align-items: center;
   gap: 4px;
@@ -1983,9 +1982,34 @@ textarea:focus-visible {
   padding: 4px 18px 8px;
 }
 
-.app-shell.is-plan .plan-control-pane .plan-sticky-header,
-.app-shell.is-plan.is-phone-viewport .plan-control-pane .plan-sticky-header {
-  display: none;
+@media (max-width: 899px) {
+  .app-shell.is-plan .plan-control-pane .plan-sticky-header {
+    display: none;
+  }
+}
+
+@media (min-width: 900px) {
+  .app-shell.is-plan .plan-control-pane .plan-sticky-header {
+    display: grid;
+    grid-template-columns: 32px minmax(0, 1fr) 32px;
+    gap: 4px;
+    padding: 0;
+  }
+
+  .app-shell.is-plan .plan-control-pane .plan-nav-btn-compact {
+    width: 32px;
+    height: 36px;
+  }
+
+  .app-shell.is-plan .plan-control-pane .plan-nav-btn-compact svg {
+    width: 20px;
+    height: 20px;
+    transform: none;
+  }
+
+  .app-shell.is-plan .plan-control-pane .plan-date-label-compact {
+    font-size: 16px;
+  }
 }
 
 .plan-floating-toolbar,
@@ -2346,28 +2370,6 @@ textarea:focus-visible {
     padding: 14px;
   }
 
-  .plan-control-pane .plan-sticky-header {
-    display: grid;
-    grid-template-columns: 32px minmax(0, 1fr) 32px;
-    gap: 4px;
-    padding: 0;
-  }
-
-  .plan-control-pane .plan-nav-btn-compact {
-    width: 32px;
-    height: 36px;
-  }
-
-  .plan-control-pane .plan-nav-btn-compact svg {
-    width: 20px;
-    height: 20px;
-    transform: none;
-  }
-
-  .plan-control-pane .plan-date-label-compact {
-    font-size: 16px;
-  }
-
   .plan-content {
     border: 1px solid var(--mz-border-soft);
     border-radius: 8px;
@@ -2563,6 +2565,52 @@ textarea:focus-visible {
   overscroll-behavior-y: contain;
   touch-action: pan-y;
   -webkit-overflow-scrolling: touch;
+  scrollbar-width: thin;
+  scrollbar-color: var(--mz-border) transparent;
+}
+
+.app-shell.is-plan .plan-container::-webkit-scrollbar,
+.app-shell.is-plan.is-phone-viewport .plan-container::-webkit-scrollbar {
+  width: 8px;
+}
+
+.app-shell.is-plan .plan-container::-webkit-scrollbar-track,
+.app-shell.is-plan.is-phone-viewport .plan-container::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.app-shell.is-plan .plan-container::-webkit-scrollbar-thumb,
+.app-shell.is-plan.is-phone-viewport .plan-container::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--mz-border) 88%, var(--mz-card-soft));
+  background-clip: padding-box;
+}
+
+.app-shell.is-plan .plan-container::-webkit-scrollbar-thumb:hover,
+.app-shell.is-plan.is-phone-viewport .plan-container::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in srgb, var(--mz-primary) 42%, var(--mz-border));
+  background-clip: padding-box;
+}
+
+.app-shell.is-plan .plan-legend-body {
+  scrollbar-width: thin;
+  scrollbar-color: var(--mz-border) transparent;
+}
+
+.app-shell.is-plan .plan-legend-body::-webkit-scrollbar {
+  width: 8px;
+}
+
+.app-shell.is-plan .plan-legend-body::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.app-shell.is-plan .plan-legend-body::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--mz-border) 88%, var(--mz-card-soft));
+  background-clip: padding-box;
 }
 
 .app-shell.is-plan .plan-legend-bottom,

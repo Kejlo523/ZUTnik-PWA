@@ -224,6 +224,7 @@ export const cache = {
   saveGrades: (scopeKey: string, data: Grade[]) => saveC(ck('grades', scopeKey), data),
   loadGrades: (scopeKey: string): Grade[] | null => loadC(ck('grades', scopeKey), TTL_MS.grades),
   loadGradesForce: (scopeKey: string): Grade[] | null => loadCForce(ck('grades', scopeKey)),
+  loadGradesTimestamp: (scopeKey: string): number => loadCTimestamp(ck('grades', scopeKey)),
 
   // Course tests per semester
   saveCourseTests: (semId: string, data: { tests: CourseTest[]; missingScopes?: string[] }) => saveC(ck('course_tests', semId), data),

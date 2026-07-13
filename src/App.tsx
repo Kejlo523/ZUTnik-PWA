@@ -1,6 +1,8 @@
 import React, { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import './App.css';
 import './zutnik-android.css';
+import './motion.css';
+import { MOTION_EASE, MOTION_MS } from './motion';
 import type {
   CalendarEvent,
   CreditSummary,
@@ -111,7 +113,7 @@ const PHONE_VIEWPORT_MAX_SIDE = 700;
 const PHONE_VIEWPORT_SCALE_FIX_RATIO = 1.35;
 const PHONE_VIEWPORT_MAX_SCALE_FIX = 3;
 
-function formatPlanUpdatedAt(timestamp: number, language: AppSettings['language']): string {
+function formatDataUpdatedAt(timestamp: number, language: AppSettings['language']): string {
   if (!timestamp) return language === 'en' ? 'Saved locally' : 'Dane zapisane lokalnie';
   const locale = language === 'en' ? 'en-GB' : 'pl-PL';
   const date = new Intl.DateTimeFormat(locale, { day: 'numeric', month: 'long' }).format(new Date(timestamp));
@@ -401,6 +403,7 @@ function App() {
   const [planResult, setPlanResult] = useState<PlanResult | null>(null);
   const [planLoading, setPlanLoading] = useState(false);
   const [planUpdatedAt, setPlanUpdatedAt] = useState(0);
+  const [gradesUpdatedAt, setGradesUpdatedAt] = useState(0);
   const [planSearchOpen, setPlanSearchOpen] = useState(false);
   const [planFiltersOpen, setPlanFiltersOpen] = useState(false);
   const [planMoreMenuOpen, setPlanMoreMenuOpen] = useState(false);
@@ -1335,6 +1338,13 @@ function App() {
     const gradesCacheBase = session.userId || 'usos';
     const gradesCacheKey = `${gradesCacheBase}_active_terms_v4`;
     const gradesCacheKeys = [gradesCacheKey, `${gradesCacheBase}_active_terms_v3`];
+    const resolveGradesUpdatedAt = () => {
+      for (const key of gradesCacheKeys) {
+        const timestamp = cache.loadGradesTimestamp(key);
+        if (timestamp) return timestamp;
+      }
+      return 0;
+    };
     let hasCachedGrades = false;
     const cachedCreditSummary = activeStudyId ? cache.loadInfoForce(activeStudyId)?.credits : null;
     if (cachedCreditSummary) setCredits(cachedCreditSummary);
@@ -1344,12 +1354,14 @@ function App() {
         const cleanedCached = keepRealGrades(cached);
         hasCachedGrades = cleanedCached.length > 0;
         setGrades(cleanedCached);
+        setGradesUpdatedAt(resolveGradesUpdatedAt());
       }
       const freshCached = gradesCacheKeys.map((key) => cache.loadGrades(key)).find((items): items is Grade[] => Boolean(items));
       if (freshCached) {
         const cleanedFreshCached = keepRealGrades(freshCached);
         cache.saveGrades(gradesCacheKey, cleanedFreshCached);
         setGrades(cleanedFreshCached);
+        setGradesUpdatedAt(resolveGradesUpdatedAt());
         return;
       }
     }
@@ -1372,6 +1384,7 @@ function App() {
       const fresh = keepRealGrades(gradesResult.value);
       cache.saveGrades(gradesCacheKey, fresh);
       setGrades(fresh);
+      setGradesUpdatedAt(Date.now());
     } catch (e) {
       if (handleSessionError(e)) return;
       if (!hasCachedGrades && !gradesRef.current.length) {
@@ -1539,6 +1552,7 @@ function App() {
     setCredits(null);
     setPlanResult(null);
     setPlanUpdatedAt(0);
+    setGradesUpdatedAt(0);
     setSelectedPlanEvent(null);
 
     if (screen === 'plan') void loadPlanData();
@@ -1930,27 +1944,27 @@ function App() {
   const moreDrawerItems = drawerItems.filter((item) => !['home', 'plan', 'info', 'grades'].includes(item.key));
 
   // ── Plan carousel animation helpers ─────────────────────────────────────────
-  function applyCarouselTransform(x: number, animated: boolean, duration = 190) {
+  function applyCarouselTransform(x: number, animated: boolean, duration: number = MOTION_MS.panel) {
     const el = carouselRef.current;
     if (!el) return;
-    el.style.transition = animated ? `transform ${duration}ms cubic-bezier(.2,0,0,1)` : 'none';
-    el.style.transform = x === 0 ? '' : `translateX(${x}px)`;
+    el.style.transition = animated ? `transform ${duration}ms ${MOTION_EASE}` : 'none';
+    el.style.transform = x === 0 ? '' : `translate3d(${x}px, 0, 0)`;
   }
 
   function commitPlanNavigate(targetDate: string, exitRight: boolean) {
     const exitX = exitRight ? window.innerWidth : -window.innerWidth;
     const enterX = -exitX;
-    applyCarouselTransform(exitX, true, 170);
+    applyCarouselTransform(exitX, true, MOTION_MS.standard);
     setTimeout(() => {
       if (carouselRef.current) {
         carouselRef.current.style.transition = 'none';
-        carouselRef.current.style.transform = `translateX(${enterX}px)`;
+        carouselRef.current.style.transform = `translate3d(${enterX}px, 0, 0)`;
       }
       const isSearch = !!(planSearchQ?.trim());
       if (isSearch) void loadPlanData({ category: planSearchCat, query: planSearchQ.trim() }, false, targetDate);
       else setPlanDate(targetDate);
-      requestAnimationFrame(() => requestAnimationFrame(() => applyCarouselTransform(0, true, 190)));
-    }, 180);
+      requestAnimationFrame(() => requestAnimationFrame(() => applyCarouselTransform(0, true, MOTION_MS.panel)));
+    }, MOTION_MS.standard);
   }
 
   // ── Plan touch swipe handlers ─────────────────────────────────────────────
@@ -1984,7 +1998,7 @@ function App() {
       carouselRef.current.style.transition = 'none';
     }
     e.preventDefault();
-    carouselRef.current.style.transform = `translateX(${dx}px)`;
+    carouselRef.current.style.transform = `translate3d(${dx}px, 0, 0)`;
   };
 
   const onPlanTouchEnd = (e: React.TouchEvent) => {
@@ -3005,9 +3019,9 @@ function App() {
       {screen !== 'login' && (
         screen === 'plan' ? (
           <header className="android-appbar plan-appbar">
-            <div className="plan-appbar-heading">
+            <div className="appbar-heading plan-appbar-heading">
               <h1>{t(SCREEN_I18N_KEY[screen])}</h1>
-              <span>{formatPlanUpdatedAt(planUpdatedAt, settings.language)}</span>
+              <span>{formatDataUpdatedAt(planUpdatedAt, settings.language)}</span>
             </div>
             <div className="plan-appbar-range">{visiblePlanResult?.headerLabel || planDate}</div>
             {renderAppBarActions()}
@@ -3017,7 +3031,14 @@ function App() {
             <button type="button" className={`icon-btn appbar-nav-btn${screen === 'news-detail' ? ' is-back' : ''}`} onClick={screen === 'news-detail' ? nav.goBack : onNavIcon} aria-label={screen === 'news-detail' ? t('general.back') : t('general.openMenu')}>
               <Ic n={screen === 'news-detail' ? 'back' : 'menu'} />
             </button>
-            <h1>{t(SCREEN_I18N_KEY[screen])}</h1>
+            {screen === 'grades' ? (
+              <div className="appbar-heading">
+                <h1>{t(SCREEN_I18N_KEY[screen])}</h1>
+                <span>{formatDataUpdatedAt(gradesUpdatedAt, settings.language)}</span>
+              </div>
+            ) : (
+              <h1>{t(SCREEN_I18N_KEY[screen])}</h1>
+            )}
             {renderAppBarActions()}
           </header>
         )

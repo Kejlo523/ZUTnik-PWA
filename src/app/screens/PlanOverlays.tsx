@@ -3,9 +3,10 @@ import { useEffect, useRef, useState, type Dispatch, type MutableRefObject, type
 import type { PlanSubjectFilter } from '../../types';
 import type { SelectedPlanEvent, TranslateFn } from '../viewTypes';
 import { fmtDateLabel, toPlanTeacherSearchQuery } from '../helpers';
+import { MOTION_MS } from '../../motion';
 import { Ic } from '../ui';
 
-const PLAN_EVENT_SHEET_TRANSITION_MS = 240;
+const PLAN_EVENT_SHEET_TRANSITION_MS = MOTION_MS.panel;
 
 interface PlanEventSheetProps {
   selectedPlanEvent: SelectedPlanEvent | null;

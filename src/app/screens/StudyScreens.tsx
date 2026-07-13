@@ -468,8 +468,8 @@ export function GradesScreen({
                         </div>
                       </button>
 
-                      {!isOpen && canExpand && (
-                        <div className="grade-group-preview">
+                      {canExpand && (
+                        <div className={`grade-group-preview${isOpen ? ' is-collapsed' : ''}`} aria-hidden={isOpen}>
                           {previewItems.map((g, i) => (
                             <span key={`${subject}-preview-${i}`} className="grade-preview-item">
                               <span className="grade-preview-type">{gradeTypeText(g)}</span>

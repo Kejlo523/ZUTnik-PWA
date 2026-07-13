@@ -246,7 +246,7 @@ textarea:focus-visible {
   overflow: auto;
   overscroll-behavior: contain;
   background: var(--mz-bg);
-  animation: zutnik-screen-in 210ms cubic-bezier(.2, .8, .2, 1) both;
+  animation: zutnik-screen-in var(--motion-screen) var(--ease-emphasized) both;
 }
 
 .screen,
@@ -911,6 +911,25 @@ textarea:focus-visible {
 .grade-group-preview {
   gap: 6px;
   margin-top: 8px;
+  max-height: 104px;
+  padding: 0 16px 12px;
+  overflow: hidden;
+  opacity: 1;
+  transition:
+    max-height 240ms var(--ease-standard),
+    opacity 180ms linear,
+    margin-top 240ms var(--ease-standard),
+    padding 240ms var(--ease-standard);
+}
+
+.grade-group-preview.is-collapsed,
+.grade-group.is-open .grade-group-preview {
+  max-height: 0;
+  margin-top: 0;
+  padding-top: 0;
+  padding-bottom: 0;
+  opacity: 0;
+  pointer-events: none;
 }
 
 .grade-type-chip,
@@ -976,6 +995,8 @@ textarea:focus-visible {
 .grade-group-items {
   display: grid;
   gap: 6px;
+  min-height: 0;
+  overflow: hidden;
   padding: 0 10px 10px;
 }
 
@@ -1311,7 +1332,7 @@ textarea:focus-visible {
   border: 0;
   background: rgb(0 0 0 / 62%);
   opacity: 0;
-  transition: opacity 180ms ease;
+  transition: opacity var(--motion-standard) linear;
 }
 
 .app-drawer.open .drawer-backdrop {
@@ -1335,7 +1356,7 @@ textarea:focus-visible {
   background: var(--mz-surface);
   box-shadow: var(--shadow-drawer);
   transform: translateY(104%);
-  transition: transform 220ms cubic-bezier(.2, .8, .2, 1);
+  transition: transform var(--motion-panel) var(--ease-emphasized);
 }
 
 .app-drawer.open .drawer-panel,
@@ -1774,12 +1795,8 @@ textarea:focus-visible {
     min-height: 172px;
   }
 
-  .grade-group.is-open {
-    grid-column: 1 / -1;
-  }
-
-  .grade-group.is-open .grade-group-items {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+  .grades-surface .grade-group.is-open {
+    min-height: 0;
   }
 
   .info-screen {
@@ -1892,14 +1909,6 @@ textarea:focus-visible {
 }
 
 /* 2026 workspace motion and Android plan parity */
-:root {
-  --motion-fast: 120ms;
-  --motion-standard: 180ms;
-  --motion-panel: 240ms;
-  --ease-standard: cubic-bezier(.2, 0, 0, 1);
-  --ease-emphasized: cubic-bezier(.2, .8, .2, 1);
-}
-
 .app-shell.is-plan,
 .app-shell.is-plan.is-phone-viewport,
 .app-shell.is-plan.is-phone-viewport.is-phone-scale-fix {
@@ -1917,22 +1926,36 @@ textarea:focus-visible {
   padding: 7px 12px 5px 18px;
 }
 
+.appbar-heading,
+.plan-appbar-heading {
+  min-width: 0;
+}
+
+.android-appbar .appbar-heading {
+  flex: 1;
+  min-width: 0;
+}
+
+.android-appbar .appbar-heading h1 {
+  padding: 0;
+}
+
+.appbar-heading > span,
+.plan-appbar-heading > span {
+  display: block;
+  margin-top: 2px;
+  color: var(--mz-muted);
+  font-size: 11px;
+  line-height: 1.1;
+}
+
 .plan-appbar-heading {
   grid-column: 1 / -1;
-  min-width: 0;
 }
 
 .plan-appbar .plan-appbar-heading h1 {
   margin: 0;
   font-size: 27px;
-  line-height: 1;
-}
-
-.plan-appbar-heading > span {
-  display: block;
-  margin-top: 5px;
-  color: var(--mz-muted);
-  font-size: 11px;
   line-height: 1;
 }
 
@@ -2190,7 +2213,7 @@ textarea:focus-visible {
 
 .plan-overflow-menu {
   transform-origin: top right;
-  animation: popover-in 150ms var(--ease-standard) both;
+  animation: popover-in var(--motion-fast) var(--ease-standard) both;
 }
 
 .toast {
@@ -2217,7 +2240,7 @@ textarea:focus-visible {
 }
 
 .news-gallery-track.is-settling {
-  transition: transform 190ms var(--ease-standard);
+  transition: transform var(--motion-standard) var(--ease-standard);
 }
 
 .news-gallery-track .news-gallery-image {
@@ -2226,7 +2249,15 @@ textarea:focus-visible {
 }
 
 .grade-group-items-wrap {
-  transition: grid-template-rows 220ms var(--ease-standard), opacity 150ms linear;
+  transition:
+    grid-template-rows var(--motion-expand) var(--ease-emphasized),
+    max-height var(--motion-expand) var(--ease-emphasized),
+    opacity var(--motion-fast) linear;
+}
+
+.grade-group-items-wrap:not(.open) .grade-group-items {
+  padding: 0;
+  visibility: hidden;
 }
 
 .drawer-backdrop,
@@ -2384,9 +2415,10 @@ textarea:focus-visible {
 
   .app-drawer,
   .app-shell.is-phone-viewport .app-drawer {
-    inset: 86px 14px 14px auto;
-    width: 360px;
-    height: auto;
+    position: fixed;
+    inset: 0;
+    width: 100%;
+    height: 100dvh;
     visibility: hidden;
     pointer-events: none;
   }
@@ -2394,18 +2426,30 @@ textarea:focus-visible {
   .app-drawer.open,
   .app-shell.is-phone-viewport .app-drawer.open {
     visibility: visible;
-    pointer-events: none;
+    pointer-events: auto;
   }
 
   .app-drawer .drawer-backdrop,
   .app-shell.is-phone-viewport .app-drawer .drawer-backdrop {
-    display: none;
+    display: block;
+    position: absolute;
+    inset: 0;
+    opacity: 0;
+  }
+
+  .app-drawer.open .drawer-backdrop,
+  .app-shell.is-phone-viewport .app-drawer.open .drawer-backdrop {
+    opacity: 1;
   }
 
   .drawer-panel,
   .app-shell.is-phone-viewport .drawer-panel {
-    inset: 0;
-    width: 100%;
+    position: absolute;
+    top: 12px;
+    right: auto;
+    bottom: 12px;
+    left: calc(var(--desktop-sidebar-w) + 10px);
+    width: min(390px, calc(100vw - var(--desktop-sidebar-w) - 28px));
     max-height: none;
     padding: 16px;
     border: 1px solid var(--mz-border-soft);
@@ -2414,13 +2458,17 @@ textarea:focus-visible {
     box-shadow: 0 18px 50px rgb(0 0 0 / 34%);
     opacity: 0;
     pointer-events: auto;
-    transform: translateX(24px);
+    transform: translateX(-18px);
   }
 
   .app-drawer.open .drawer-panel,
   .app-shell.is-phone-viewport .app-drawer.open .drawer-panel {
     opacity: 1;
     transform: translateX(0);
+  }
+
+  .drawer-grabber {
+    display: none;
   }
 
   .drawer-header-title {
@@ -2489,8 +2537,9 @@ textarea:focus-visible {
     font-size: 25px;
   }
 
-  .app-shell .plan-appbar-heading > span {
-    margin-top: 3px;
+  .app-shell .plan-appbar-heading > span,
+  .app-shell .appbar-heading > span {
+    margin-top: 2px;
     font-size: 10px;
   }
 

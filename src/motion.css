@@ -1,0 +1,152 @@
+/* 120Hz-friendly motion tokens and compositor tuning */
+:root {
+  --motion-instant: 80ms;
+  --motion-fast: 120ms;
+  --motion-standard: 160ms;
+  --motion-panel: 200ms;
+  --motion-screen: 200ms;
+  --motion-expand: 200ms;
+  --motion-stagger: 32ms;
+  --motion-spin: 640ms;
+  --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+  --ease-emphasized: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --ease-spring: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-out: cubic-bezier(0, 0, 0.2, 1);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .drawer-panel,
+  .plan-carousel-track,
+  .grade-group-preview,
+  .plan-overflow-menu,
+  .toast,
+  .banner,
+  .plan-event-sheet,
+  .plan-search-sheet,
+  .plan-filters-sheet,
+  .install-tip-card,
+  .ios-inst-card,
+  .news-gallery-track.is-settling,
+  .screen {
+    transform: translate3d(0, 0, 0);
+    backface-visibility: hidden;
+  }
+
+  .drawer-panel,
+  .plan-event-sheet,
+  .plan-search-sheet,
+  .plan-filters-sheet,
+  .plan-carousel-track {
+    will-change: transform, opacity;
+  }
+}
+
+/* Unified durations for shared motion primitives */
+.drawer-panel,
+.app-drawer.open .drawer-panel {
+  transition-duration: var(--motion-panel);
+  transition-timing-function: var(--ease-standard);
+}
+
+.drawer-backdrop {
+  transition-duration: var(--motion-standard);
+  transition-timing-function: linear;
+}
+
+.grade-group,
+.grade-group-preview,
+.grade-group-items-wrap,
+.grade-group-chevron {
+  transition-duration: var(--motion-expand);
+  transition-timing-function: var(--ease-standard);
+}
+
+.grade-group-items-wrap.open .grade-row {
+  animation-duration: var(--motion-expand);
+  animation-timing-function: var(--ease-spring);
+}
+
+.grade-group-items-wrap.open .grade-row:nth-child(2) {
+  animation-delay: calc(var(--motion-stagger) * 1);
+}
+
+.grade-group-items-wrap.open .grade-row:nth-child(3) {
+  animation-delay: calc(var(--motion-stagger) * 2);
+}
+
+.grade-group-items-wrap.open .grade-row:nth-child(4) {
+  animation-delay: calc(var(--motion-stagger) * 3);
+}
+
+.plan-carousel-track {
+  transition-duration: var(--motion-panel);
+  transition-timing-function: var(--ease-standard);
+}
+
+.plan-overflow-menu,
+.toast,
+.banner,
+.install-tip-card,
+.ios-inst-card,
+.plan-active-filters-bar,
+.spinner-wrap,
+.empty-state,
+.login-header,
+.login-card {
+  animation-duration: var(--motion-standard);
+  animation-timing-function: var(--ease-emphasized);
+}
+
+.install-tip-card,
+.ios-inst-card {
+  animation-duration: var(--motion-panel);
+}
+
+.plan-event-sheet,
+.plan-search-sheet,
+.plan-filters-sheet,
+[class*='sheet'] {
+  animation-duration: var(--motion-panel);
+  transition-duration: var(--motion-panel);
+  transition-timing-function: var(--ease-standard);
+}
+
+.app-shell main,
+.app-shell.is-phone-viewport main,
+.screen {
+  animation-duration: var(--motion-screen);
+  animation-timing-function: var(--ease-emphasized);
+}
+
+.news-gallery-track.is-settling {
+  transition-duration: var(--motion-standard);
+  transition-timing-function: var(--ease-standard);
+}
+
+.banner,
+.toast {
+  animation-duration: var(--motion-standard);
+}
+
+.spinner,
+.banner-spinner,
+[class*='spinner'] {
+  animation-duration: var(--motion-spin);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .drawer-panel,
+  .plan-carousel-track,
+  .grade-group-preview,
+  .plan-overflow-menu,
+  .toast,
+  .banner,
+  .plan-event-sheet,
+  .plan-search-sheet,
+  .plan-filters-sheet,
+  .install-tip-card,
+  .screen {
+    will-change: auto;
+    transform: none;
+  }
+}

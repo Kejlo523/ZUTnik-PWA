@@ -1,4 +1,8 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type Dispatch, type MutableRefObject, type SetStateAction, type TouchEvent } from 'react';
+import { createPortal } from 'react-dom';
+
+import { useOverscrollLock } from '../../hooks/useOverscrollLock';
+import type { BackInterceptResult } from '../../hooks/useAppNavigation';
 
 import type { NewsItem, StatsCountShare, StatsSeriesDay, StatsSnapshot, UsefulLink } from '../../types';
 import type { AppSettings } from '../../services/storage';
@@ -447,7 +451,7 @@ export function NewsScreen({ newsLoading, news, t, onOpenDetail }: NewsScreenPro
 interface NewsDetailScreenProps {
   item?: NewsItem;
   t: TranslateFn;
-  backInterceptRef: MutableRefObject<(() => boolean) | null>;
+  galleryBackRef: MutableRefObject<(() => BackInterceptResult) | null>;
 }
 
 interface NewsGalleryModalProps {
@@ -473,6 +477,17 @@ function NewsGalleryModal({ images, index, onClose, onNext, onPrev }: NewsGaller
   const swipeCommitTimerRef = useRef<number | null>(null);
   const hasMany = images.length > 1;
 
+  const resetSwipe = () => {
+    setSwipeState({ dx: 0, progress: 0, phase: 'idle', direction: 0 });
+  };
+
+  useEffect(() => {
+    setZoom(1);
+    resetSwipe();
+  }, [index]);
+
+  useOverscrollLock(true);
+
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') onClose();
@@ -494,10 +509,6 @@ function NewsGalleryModal({ images, index, onClose, onNext, onPrev }: NewsGaller
 
   const toggleZoom = () => {
     setZoom((current) => (current > 1 ? 1 : 2));
-  };
-
-  const resetSwipe = () => {
-    setSwipeState({ dx: 0, progress: 0, phase: 'idle', direction: 0 });
   };
 
   const finishSwipe = (direction: -1 | 1) => {
@@ -600,7 +611,7 @@ function NewsGalleryModal({ images, index, onClose, onNext, onPrev }: NewsGaller
     swipeState.phase === 'settling' ? 'is-settling' : '',
   ].filter(Boolean).join(' ');
 
-  return (
+  return createPortal(
     <div className="news-gallery-modal" role="dialog" aria-modal="true" onClick={onClose}>
       <div className="news-gallery-surface" onClick={(event) => event.stopPropagation()}>
         <div className="news-gallery-topbar">
@@ -615,16 +626,20 @@ function NewsGalleryModal({ images, index, onClose, onNext, onPrev }: NewsGaller
           </div>
         </div>
 
-        <div className="news-gallery-frame" onTouchStart={onTouchStart} onTouchMove={onTouchMove} onTouchEnd={onTouchEnd} onTouchCancel={onTouchCancel}>
+        <div
+          className="news-gallery-frame"
+          onTouchStart={onTouchStart}
+          onTouchMove={onTouchMove}
+          onTouchEnd={onTouchEnd}
+          onTouchCancel={onTouchCancel}
+        >
           {hasMany ? (
             <button type="button" className="news-gallery-nav news-gallery-nav-prev" onClick={onPrev} aria-label="Poprzednie zdjęcie">
               <Ic n="chevL" />
             </button>
-          ) : (
-            <div className="news-gallery-nav-spacer" aria-hidden />
-          )}
+          ) : null}
 
-          <div className={`news-gallery-stage${zoom > 1 ? ' is-zoomed' : ''}`}>
+          <div className={`news-gallery-viewport${zoom > 1 ? ' is-zoomed' : ''}`}>
             {canAnimateSwipe ? (
               <div className={swipeTrackClass} style={swipeTrackStyle}>
                 {[-1, 0, 1].map((offset) => {
@@ -658,17 +673,17 @@ function NewsGalleryModal({ images, index, onClose, onNext, onPrev }: NewsGaller
             <button type="button" className="news-gallery-nav news-gallery-nav-next" onClick={onNext} aria-label="Następne zdjęcie">
               <Ic n="chevR" />
             </button>
-          ) : (
-            <div className="news-gallery-nav-spacer" aria-hidden />
-          )}
+          ) : null}
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 
-export function NewsDetailScreen({ item, t, backInterceptRef }: NewsDetailScreenProps) {
+export function NewsDetailScreen({ item, t, galleryBackRef }: NewsDetailScreenProps) {
   const [galleryIndex, setGalleryIndex] = useState<number | null>(null);
+  const galleryHistoryRef = useRef(false);
 
   const preparedContent = useMemo(
     () => (item ? prepareNewsDetailContent(item.contentHtml || item.descriptionHtml, item.thumbUrl) : { html: '', images: [] }),
@@ -682,18 +697,30 @@ export function NewsDetailScreen({ item, t, backInterceptRef }: NewsDetailScreen
   useEffect(() => {
     if (!galleryOpen) return;
 
-    const handler = () => {
+    window.history.pushState({ zutnik: true, overlay: 'news-gallery' }, '', window.location.href);
+    galleryHistoryRef.current = true;
+
+    const handler = (): BackInterceptResult => {
+      galleryHistoryRef.current = false;
       setGalleryIndex(null);
-      return true;
+      return 'consume';
     };
 
-    backInterceptRef.current = handler;
+    galleryBackRef.current = handler;
     return () => {
-      if (backInterceptRef.current === handler) {
-        backInterceptRef.current = null;
+      if (galleryBackRef.current === handler) {
+        galleryBackRef.current = null;
       }
     };
-  }, [backInterceptRef, galleryOpen]);
+  }, [galleryBackRef, galleryOpen]);
+
+  const closeGallery = () => {
+    if (galleryHistoryRef.current) {
+      window.history.back();
+      return;
+    }
+    setGalleryIndex(null);
+  };
 
   const goToGalleryImage = (direction: -1 | 1) => {
     setGalleryIndex((current) => {
@@ -744,7 +771,7 @@ export function NewsDetailScreen({ item, t, backInterceptRef }: NewsDetailScreen
           key={preparedContent.images[safeGalleryIndex]?.src ?? safeGalleryIndex}
           images={preparedContent.images}
           index={safeGalleryIndex}
-          onClose={() => setGalleryIndex(null)}
+          onClose={closeGallery}
           onNext={() => goToGalleryImage(1)}
           onPrev={() => goToGalleryImage(-1)}
         />

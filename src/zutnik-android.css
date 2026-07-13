@@ -2244,7 +2244,6 @@ textarea:focus-visible {
 }
 
 .news-gallery-track .news-gallery-image {
-  transform: none;
   transition: opacity var(--motion-standard) linear;
 }
 

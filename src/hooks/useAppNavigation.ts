@@ -9,8 +9,26 @@ export interface ScreenEntry<TScreen extends string = string, TParams = unknown>
 const EXIT_EVENT = 'zutnik-exit-attempt';
 const LAST_SCREEN_KEY = 'zutnik_last_screen';
 
+export type BackInterceptResult = boolean | 'consume';
+const PERSISTABLE_SCREENS = new Set([
+  'home',
+  'plan',
+  'grades',
+  'finance',
+  'info',
+  'news',
+  'stats',
+  'links',
+  'settings',
+  'about',
+]);
+
+function isPersistableScreen(key: string): boolean {
+  return PERSISTABLE_SCREENS.has(key);
+}
+
 interface UseAppNavigationOptions {
-  onBackAttemptRef?: MutableRefObject<(() => boolean) | null>;
+  onBackAttemptRef?: MutableRefObject<(() => BackInterceptResult) | null>;
   onRootBackAttemptRef?: MutableRefObject<(() => boolean) | null>;
 }
 
@@ -22,7 +40,9 @@ export function useAppNavigation<TScreen extends string>(
 
   // Try to load the last screen strictly if it wasn't a manual reset during boot
   const storedScreen = window.localStorage.getItem(LAST_SCREEN_KEY) as TScreen | null;
-  const startScreen = (storedScreen && initialScreen === 'home') ? storedScreen : initialScreen;
+  const startScreen = (storedScreen && isPersistableScreen(storedScreen) && initialScreen === 'home')
+    ? storedScreen
+    : initialScreen;
 
   const [stack, setStack] = useState<ScreenEntry<TScreen>[]>([{ key: startScreen, id: 1 }]);
   const stackRef = useRef(stack);
@@ -30,7 +50,7 @@ export function useAppNavigation<TScreen extends string>(
   useEffect(() => {
     stackRef.current = stack;
     const currentKey = stack[stack.length - 1].key;
-    if (currentKey !== 'login') {
+    if (isPersistableScreen(currentKey)) {
       window.localStorage.setItem(LAST_SCREEN_KEY, currentKey);
     }
   }, [stack]);
@@ -41,8 +61,12 @@ export function useAppNavigation<TScreen extends string>(
     window.history.pushState(marker, '', window.location.href);
 
     const onPopState = () => {
-      if (options?.onBackAttemptRef?.current?.()) {
+      const intercept = options?.onBackAttemptRef?.current?.();
+      if (intercept === true) {
         window.history.pushState({ zutnik: true, ts: Date.now() }, '', window.location.href);
+        return;
+      }
+      if (intercept === 'consume') {
         return;
       }
 

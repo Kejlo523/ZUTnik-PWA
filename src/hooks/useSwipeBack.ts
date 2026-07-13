@@ -1,6 +1,8 @@
 import type React from 'react';
 import { useCallback, useRef } from 'react';
 
+import { isOverscrollLocked } from './useOverscrollLock';
+
 interface SwipeHandlers {
   onTouchStart: (e: React.TouchEvent<HTMLElement>) => void;
   onTouchMove: (e: React.TouchEvent<HTMLElement>) => void;
@@ -25,6 +27,8 @@ function isInteractiveTarget(el: EventTarget | null): boolean {
   const node = el as Element;
   if (node.classList.contains('drawer-backdrop')) return false;
   if (node.closest('.plan-carousel-track')) return true;
+  if (node.closest('.news-gallery-modal')) return true;
+  if (node.closest('.plan-event-sheet-overlay')) return true;
   if (INTERACTIVE_TAGS.has(node.tagName)) return true;
   if (node.getAttribute('role') === 'button') return true;
   return false;
@@ -37,6 +41,10 @@ export function useSwipeGestures({ canGoBack, onBack, canOpenDrawer, onOpenDrawe
 
   const onTouchStart = useCallback((e: React.TouchEvent<HTMLElement>) => {
     if (e.touches.length !== 1) return;
+    if (isOverscrollLocked()) {
+      blocked.current = true;
+      return;
+    }
 
     const x = e.touches[0].clientX;
     const fromEdge = x <= EDGE_SWIPE_WIDTH;

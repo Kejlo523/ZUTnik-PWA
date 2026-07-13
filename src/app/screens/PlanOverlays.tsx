@@ -1,9 +1,11 @@
 import { useEffect, useRef, useState, type Dispatch, type MutableRefObject, type SetStateAction } from 'react';
+import { createPortal } from 'react-dom';
 
 import type { PlanSubjectFilter } from '../../types';
 import type { SelectedPlanEvent, TranslateFn } from '../viewTypes';
 import { fmtDateLabel, toPlanTeacherSearchQuery } from '../helpers';
 import { MOTION_MS } from '../../motion';
+import { useOverscrollLock } from '../../hooks/useOverscrollLock';
 import { Ic } from '../ui';
 
 const PLAN_EVENT_SHEET_TRANSITION_MS = MOTION_MS.panel;
@@ -100,6 +102,8 @@ export function PlanEventSheet({ selectedPlanEvent, onClose, language, onQuickSe
     });
   }, [renderedPlanEvent]);
 
+  useOverscrollLock(isOpen && !!renderedPlanEvent);
+
   if (!renderedPlanEvent) return null;
 
   const { date, event } = renderedPlanEvent;
@@ -142,7 +146,7 @@ export function PlanEventSheet({ selectedPlanEvent, onClose, language, onQuickSe
     );
   };
 
-  return (
+  return createPortal(
     <div className={`event-sheet-overlay plan-event-sheet-overlay${isOpen ? ' is-open' : ''}`} onClick={onClose}>
       <div className="event-sheet plan-event-sheet" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-label="Szczegóły zajęć">
         <div className="event-sheet-handle" />
@@ -159,7 +163,8 @@ export function PlanEventSheet({ selectedPlanEvent, onClose, language, onQuickSe
           Zamknij
         </button>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 
@@ -194,6 +199,8 @@ export function PlanSearchSheet({
   setPlanSearchOpen,
   t,
 }: PlanSearchSheetProps) {
+  useOverscrollLock(planSearchOpen);
+
   if (!planSearchOpen) return null;
 
   const handleQueryChange = (value: string) => {
@@ -345,6 +352,8 @@ export function PlanFiltersSheet({
   onReset,
   onClose,
 }: PlanFiltersSheetProps) {
+  useOverscrollLock(open);
+
   if (!open) return null;
 
   const excludedCount = hiddenKeys.length;

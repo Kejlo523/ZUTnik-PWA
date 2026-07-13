@@ -21,6 +21,20 @@ body {
   margin: 0;
 }
 
+html.is-overscroll-locked,
+html.is-overscroll-locked body {
+  overscroll-behavior: none;
+}
+
+html.is-overscroll-locked body {
+  overflow: hidden;
+}
+
+html.is-overscroll-locked .app-shell,
+html.is-overscroll-locked .app-shell main {
+  overflow: hidden !important;
+}
+
 /* Prevent pull-to-refresh on mobile and disable global text selection for app-like feel */
 body {
   overscroll-behavior-y: none;

@@ -54,7 +54,7 @@ import {
   type AppSettings,
 } from './services/storage';
 import { sortUsefulLinks } from './constants/usefulLinks';
-import { useAppNavigation, useExitAttemptToast } from './hooks/useAppNavigation';
+import { useAppNavigation, useExitAttemptToast, type BackInterceptResult } from './hooks/useAppNavigation';
 import { useSwipeGestures } from './hooks/useSwipeBack';
 import { createT } from './i18n';
 import {
@@ -338,7 +338,8 @@ function App() {
   const sessionCheckInFlightRef = useRef<Promise<boolean> | null>(null);
   const lastSessionCheckRef = useRef<{ key: string; ts: number }>({ key: '', ts: 0 });
   const activeSessionKeyRef = useRef(sessionKey);
-  const overlayBackAttemptRef = useRef<(() => boolean) | null>(null);
+  const overlayBackAttemptRef = useRef<(() => BackInterceptResult) | null>(null);
+  const newsGalleryBackRef = useRef<(() => BackInterceptResult) | null>(null);
   const rootBackAttemptRef = useRef<(() => boolean) | null>(null);
   const phoneViewportRafRef = useRef<number | null>(null);
   const phoneViewportTimerRefs = useRef<number[]>([]);
@@ -681,6 +682,44 @@ function App() {
   }, [canOpenStats, nav, screen]);
 
   useEffect(() => {
+    if (screen !== 'news-detail') return;
+    const params = (nav.current.params ?? {}) as NewsDetailParams;
+    if (!params?.item) {
+      nav.reset('home', undefined);
+    }
+  }, [nav, screen]);
+
+  useEffect(() => {
+    overlayBackAttemptRef.current = () => {
+      const galleryResult = newsGalleryBackRef.current?.();
+      if (galleryResult === true) return true;
+      if (galleryResult === 'consume') return 'consume';
+
+      if (screen === 'news-detail') {
+        nav.reset('home', undefined);
+        return 'consume';
+      }
+      if (selectedPlanEvent) {
+        setSelectedPlanEvent(null);
+        return true;
+      }
+      if (planFiltersOpen) {
+        setPlanFiltersOpen(false);
+        return true;
+      }
+      if (planSearchOpen) {
+        setPlanSearchOpen(false);
+        return true;
+      }
+      return false;
+    };
+
+    return () => {
+      overlayBackAttemptRef.current = null;
+    };
+  }, [nav, planFiltersOpen, planSearchOpen, screen, selectedPlanEvent]);
+
+  useEffect(() => {
     if (statsDeepLinkHandledRef.current || !session) return;
     const params = new URLSearchParams(window.location.search);
     if (params.get('screen') !== 'stats') return;
@@ -824,7 +863,7 @@ function App() {
         resetPlanSearch();
       }
     },
-    canOpenDrawer: !drawerOpen && screen !== 'login' && screen !== 'plan',
+    canOpenDrawer: !drawerOpen && screen !== 'login' && screen !== 'plan' && !selectedPlanEvent && !planFiltersOpen && !planSearchOpen,
     onOpenDrawer: () => setDrawerOpen(true),
     canCloseDrawer: drawerOpen,
     onCloseDrawer: () => setDrawerOpen(false),
@@ -2693,14 +2732,14 @@ function App() {
         newsLoading={newsLoading}
         news={news}
         t={t}
-        onOpenDetail={(item) => nav.push('news-detail', { item } as unknown as NewsDetailParams)}
+        onOpenDetail={(item) => nav.navigateTo('news-detail', 'home', { item } as unknown as NewsDetailParams)}
       />
     );
   }
 
   function renderNewsDetail() {
     const p = (nav.current.params ?? {}) as NewsDetailParams;
-    return <NewsDetailScreen key={p.item?.id ?? 'empty-news'} item={p.item} t={t} backInterceptRef={overlayBackAttemptRef} />;
+    return <NewsDetailScreen key={p.item?.id ?? 'empty-news'} item={p.item} t={t} galleryBackRef={newsGalleryBackRef} />;
   }
 
   function renderLinks() {
@@ -3028,7 +3067,7 @@ function App() {
           </header>
         ) : (
           <header className="android-appbar">
-            <button type="button" className={`icon-btn appbar-nav-btn${screen === 'news-detail' ? ' is-back' : ''}`} onClick={screen === 'news-detail' ? nav.goBack : onNavIcon} aria-label={screen === 'news-detail' ? t('general.back') : t('general.openMenu')}>
+            <button type="button" className={`icon-btn appbar-nav-btn${screen === 'news-detail' ? ' is-back' : ''}`} onClick={screen === 'news-detail' ? () => nav.reset('home', undefined) : onNavIcon} aria-label={screen === 'news-detail' ? t('general.back') : t('general.openMenu')}>
               <Ic n={screen === 'news-detail' ? 'back' : 'menu'} />
             </button>
             {screen === 'grades' ? (

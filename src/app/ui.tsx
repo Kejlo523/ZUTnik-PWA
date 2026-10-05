@@ -1,5 +1,5 @@
 import { useLayoutEffect, useRef, type ComponentProps, type CSSProperties, type ChangeEventHandler, type ReactNode } from 'react';
-import { ArrowLeft, Bell, CalendarDays, Check, ChevronLeft, ChevronRight, Clock, Download, Eye, Filter, GraduationCap, Home, Info, Layers, Link, Lock, LogOut, MapPin, Menu, MoreHorizontal, MoreVertical, Newspaper, Pencil, Plus, Minus, RefreshCw, Search, Settings, Share2, Star, Trash2, Users, UserRound, Wallet, WifiOff, X, ChartNoAxesColumnIncreasing, CheckSquare, GripVertical, Expand, Upload, ExternalLink, Mail, GitFork, Smartphone, type LucideIcon } from 'lucide-react';
+import { ArrowLeft, Bell, CalendarDays, Check, ChevronLeft, ChevronRight, Clock, Download, Eye, Filter, GraduationCap, Home, Info, Layers, Link, Lock, LogOut, MapPin, Menu, MoreHorizontal, MoreVertical, Newspaper, Pencil, Plus, Minus, RefreshCw, Search, Settings, Share2, Star, Trash2, Users, UserRound, Wallet, WifiOff, X, ChartNoAxesColumnIncreasing, CheckSquare, GripVertical, Expand, Upload, ExternalLink, Mail, GitFork, Smartphone, MonitorDown, type LucideIcon } from 'lucide-react';
 
 const icons: Record<string, LucideIcon> = {
   back: ArrowLeft, bell: Bell, calendar: CalendarDays, check: Check,
@@ -11,7 +11,7 @@ const icons: Record<string, LucideIcon> = {
   search: Search, settings: Settings, share: Share2, star: Star, trash: Trash2,
   group: Users, user: UserRound, wallet: Wallet, 'wifi-off': WifiOff, x: X,
   stats: ChartNoAxesColumnIncreasing, present: CheckSquare, grip: GripVertical,
-  expand: Expand, upload: Upload, external: ExternalLink, mail: Mail, github: GitFork, store: Smartphone,
+  expand: Expand, upload: Upload, external: ExternalLink, mail: Mail, github: GitFork, store: Smartphone, install: MonitorDown,
 };
 
 export function Ic({ n }: { n: string }) {

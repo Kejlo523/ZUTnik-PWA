@@ -8,6 +8,11 @@ test.afterEach(async ({ request }) => {
 test('production PWA cold-starts offline with lazy screens and saved login', async ({ page, context, browserName, request }) => {
   test.skip(!process.env.TEST_PRODUCTION, 'Requires the built production app and its service worker.');
   await fixture(page, false);
+  await page.emulateMedia({ colorScheme: 'dark' });
+  await page.addInitScript(() => {
+    const settings = JSON.parse(localStorage.getItem('zutnik_pwa_settings') || '{}');
+    localStorage.setItem('zutnik_pwa_settings', JSON.stringify({ ...settings, theme: 'light' }));
+  });
   const requests: string[] = [];
   page.on('request', (request) => { if (request.url().includes('/api/')) requests.push(request.url()); });
   await page.goto('');
@@ -33,6 +38,10 @@ test('production PWA cold-starts offline with lazy screens and saved login', asy
   } else await context.setOffline(true);
   await page.reload();
   await expect(page.getByRole('heading', { name: 'Plan zajęć', exact: true })).toBeVisible();
+  await expect(page.locator('meta[name="theme-color"]')).toHaveAttribute('content', '#f4f6f7');
+  await expect(page.locator('meta[name="color-scheme"]')).toHaveAttribute('content', 'light');
+  await expect(page.locator('.android-appbar')).toHaveCSS('background-color', 'rgb(244, 246, 247)');
+  await expect(page.locator('.primary-navigation')).toHaveCSS('background-color', 'rgb(255, 255, 255)');
   await page.locator('.primary-navigation').getByRole('button', { name: 'Oceny', exact: true }).click();
   await expect(page.locator('.grade-group')).toHaveCount(2);
   await page.locator('.primary-navigation').getByRole('button', { name: 'Studia', exact: true }).click();

@@ -40,21 +40,15 @@ for (const viewport of [{ name: 'mobile', width: 393, height: 852 }, { name: 'sm
   });
 }
 
-test('home editing persists, search shortcut works, refresh cooldown avoids requests', async ({ page }) => {
-  const requests = await fixture(page); await page.setViewportSize({ width: 393, height: 852 }); await page.goto('');
-  await page.getByRole('button', { name: 'Edytuj kafelki' }).click();
-  expect(await page.locator('.tile-editing').evaluateAll((tiles) => tiles.every((tile) => {
-    const rect = tile.getBoundingClientRect();
-    return [...tile.querySelectorAll('.tile-edit-tools button')].every((button) => {
-      const box = button.getBoundingClientRect(); return box.width >= 44 && box.height >= 44 && box.left >= rect.left && box.right <= rect.right;
-    });
-  }))).toBe(true);
-  await page.getByRole('button', { name: 'Dodaj kafelek' }).click();
-  await page.getByLabel('Tytuł', { exact: true }).fill('Piotr');
-  await page.getByLabel('Prowadzący / zapytanie').fill('Klęsk');
-  await page.getByRole('button', { name: 'Gotowe', exact: true }).click();
-  await page.getByRole('button', { name: 'Zapisz', exact: true }).click();
-  await page.reload(); await page.getByRole('button', { name: 'Piotr', exact: true }).click();
+test('saved search shortcut still works without the editor, refresh cooldown avoids requests', async ({ page }) => {
+  const requests = await fixture(page);
+  await page.addInitScript(() => localStorage.setItem('zutnik_home:99999', JSON.stringify([
+    { id: 'teacher-shortcut', title: 'Piotr', description: '', icon: 'search', action: 'search', value: 'Klęsk', color: '#596e9e' },
+  ])));
+  await page.setViewportSize({ width: 393, height: 852 }); await page.goto('');
+  await expect(page.getByRole('button', { name: 'Edytuj kafelki' })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Zapisz jako aplikację', exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Piotr', exact: true }).click();
   await expect(page.getByRole('dialog', { name: 'Szukaj w planie' })).toBeVisible();
   await page.getByRole('button', { name: 'Piotr Klęsk [teacher-1]', exact: true }).click();
   await page.getByRole('button', { name: 'Szukaj', exact: true }).click();

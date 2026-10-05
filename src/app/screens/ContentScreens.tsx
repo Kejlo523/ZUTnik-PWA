@@ -1063,14 +1063,15 @@ export function SettingsScreen({ settings, setSettings, t }: SettingsScreenProps
 interface AboutScreenProps {
   canOfferInstall: boolean;
   handleInstallPwa: () => Promise<void> | void;
-  isIosSafari: boolean;
+  installBusy: boolean;
+  installDescription: string;
   t: TranslateFn;
 }
 
 const PLAY_STORE_URL = 'https://play.google.com/store/apps/details?id=pl.kejlo.zutnik';
 const PROJECT_URL = 'https://zutnik.endozero.pl';
 
-export function AboutScreen({ canOfferInstall, handleInstallPwa, isIosSafari, t }: AboutScreenProps) {
+export function AboutScreen({ canOfferInstall, handleInstallPwa, installBusy, installDescription, t }: AboutScreenProps) {
   const [shareStatus, setShareStatus] = useState('');
   const shareApp = async () => {
     try {
@@ -1097,7 +1098,7 @@ export function AboutScreen({ canOfferInstall, handleInstallPwa, isIosSafari, t 
       <div className="about-actions">
         <a href={PLAY_STORE_URL} target="_blank" rel="noreferrer" className="about-action-card"><span className="about-action-icon is-rating"><Ic n="star" /></span><span className="about-action-content"><span className="about-action-title">{t('about.rateApp')}</span><span className="about-action-desc">{t('about.rateDesc')}</span></span><Ic n="chevR" /></a>
         <a href="https://github.com/Kejlo523/ZUTnik" target="_blank" rel="noreferrer" className="about-action-card"><span className="about-action-icon"><Ic n="github" /></span><span className="about-action-content"><span className="about-action-title">{t('about.sourceCode')}</span><span className="about-action-desc">{t('about.sourceDesc')}</span></span><Ic n="external" /></a>
-        {canOfferInstall && <button className="about-action-card" onClick={() => void handleInstallPwa()}><span className="about-action-icon"><Ic n="download" /></span><span className="about-action-content"><span className="about-action-title">{t('about.installApp')}</span><span className="about-action-desc">{isIosSafari ? t('about.installIos') : t('about.installAndroid')}</span></span><Ic n="chevR" /></button>}
+        {canOfferInstall && <button className="about-action-card" aria-label={t('install.action')} disabled={installBusy} onClick={() => void handleInstallPwa()}><span className="about-action-icon"><Ic n="install" /></span><span className="about-action-content"><span className="about-action-title">{t('install.action')}</span><span className="about-action-desc">{installDescription}</span></span><Ic n="chevR" /></button>}
       </div>
     </div>
     <div className="about-panels">

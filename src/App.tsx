@@ -3,6 +3,7 @@ import './App.css';
 import { PlanScreen } from './app/screens/PlanScreen';
 import { useTimetable } from './hooks/useTimetable';
 import { useScreenMotion } from './hooks/useScreenMotion';
+import { usePwaInstall } from './hooks/usePwaInstall';
 import { beginRefresh, finishRefresh, type ResourceModule } from './services/refreshPolicy';
 import { removeResources, readResource, saveResource } from './services/offlineStore';
 import { clearTimetableAccount } from './services/timetable';
@@ -85,6 +86,7 @@ import { HomeScreen, LoginScreen } from './app/screens/AuthScreens';
 import { PlanEventSheet, PlanFiltersSheet, PlanSearchSheet } from './app/screens/PlanOverlays';
 import { AppNavigation } from './app/AppNavigation';
 import { PwaUpdateNotice } from './app/components/PwaUpdateNotice';
+import { PwaInstallSheet } from './app/components/PwaInstallSheet';
 import { Sheet } from './app/components/Sheet';
 
 const GradesScreen = lazy(() => import('./app/screens/StudyScreens').then((module) => ({ default: module.GradesScreen })));
@@ -107,19 +109,6 @@ function formatDataUpdatedAt(timestamp: number, language: AppSettings['language'
   return language === 'en' ? `Updated ${date}` : `Odświeżono ${date}`;
 }
 
-
-interface NavigatorWithStandalone extends Navigator {
-  standalone?: boolean;
-}
-
-interface BeforeInstallPromptChoiceResult {
-  outcome: 'accepted' | 'dismissed';
-}
-
-interface BeforeInstallPromptEvent extends Event {
-  prompt: () => Promise<void> | void;
-  userChoice: Promise<BeforeInstallPromptChoiceResult>;
-}
 
 function normalizePlanHiddenSubjectKeys(keys: string[]): string[] {
   return [...new Set(
@@ -154,11 +143,19 @@ function keepRealGrades(items: Grade[]): Grade[] {
 
 function applyThemePreference(theme: AppSettings['theme']): void {
   const root = document.documentElement;
-  if (theme === 'system') {
-    root.dataset.theme = window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
-    return;
+  const resolvedTheme = theme === 'system'
+    ? window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark'
+    : theme;
+  root.dataset.theme = resolvedTheme;
+
+  // Page metadata overrides the manifest's launch color in supported browsers.
+  const chromeColor = getComputedStyle(root).getPropertyValue('--mz-bg').trim();
+  const themeColor = document.querySelector<HTMLMetaElement>('meta[name="theme-color"]');
+  if (themeColor && chromeColor && themeColor.content !== chromeColor) {
+    themeColor.content = chromeColor;
   }
-  root.dataset.theme = theme;
+  const colorScheme = document.querySelector<HTMLMetaElement>('meta[name="color-scheme"]');
+  if (colorScheme && colorScheme.content !== resolvedTheme) colorScheme.content = resolvedTheme;
 }
 
 function App() {
@@ -192,52 +189,11 @@ function App() {
   const statsDeepLinkHandledRef = useRef(false);
 
   const [drawerOpen, setDrawerOpen] = useState(false);
-  const [homeEditing, setHomeEditing] = useState(false);
   const [planSearchSeed, setPlanSearchSeed] = useState<{ category: string; query: string } | undefined>();
   const suggestionSequence = useRef(0);
 
-  // PWA install prompt
-  const deferredPromptRef = useRef<BeforeInstallPromptEvent | null>(null);
-  const [canInstallPwa, setCanInstallPwa] = useState(false);
-  const isStandalone = window.matchMedia('(display-mode: standalone)').matches
-    || (window.navigator as NavigatorWithStandalone).standalone === true;
-  // iOS Safari detection — beforeinstallprompt never fires on iOS
-  const isIos = /iphone|ipad|ipod/i.test(navigator.userAgent)
-    || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
-  const isIosSafari = isIos
-    && /safari/i.test(navigator.userAgent)
-    && !/crios|fxios|chrome|chromium/i.test(navigator.userAgent);
-  // On iOS Safari user installs manually via Share sheet — we can offer instructions
-  const canOfferInstall = !isStandalone && (canInstallPwa || isIosSafari);
-
-  const [showIosInstructions, setShowIosInstructions] = useState(false);
-
-  useEffect(() => {
-    const handler = (e: Event) => {
-      e.preventDefault();
-      deferredPromptRef.current = e as BeforeInstallPromptEvent;
-      setCanInstallPwa(true);
-    };
-    window.addEventListener('beforeinstallprompt', handler);
-    const installed = () => { setCanInstallPwa(false); deferredPromptRef.current = null; };
-    window.addEventListener('appinstalled', installed);
-    return () => { window.removeEventListener('beforeinstallprompt', handler); window.removeEventListener('appinstalled', installed); };
-  }, []);
-
-  const handleInstallPwa = async () => {
-    if (isIosSafari) {
-      setShowIosInstructions(true);
-      return;
-    }
-    const prompt = deferredPromptRef.current;
-    if (!prompt?.prompt) return;
-    await prompt.prompt();
-    const result = await prompt.userChoice;
-    if (result?.outcome === 'accepted') {
-      setCanInstallPwa(false);
-      deferredPromptRef.current = null;
-    }
-  };
+  const pwaInstall = usePwaInstall();
+  const { guideOpen: installGuideOpen, closeGuide: closeInstallGuide } = pwaInstall;
 
   // Plan
   const [planViewMode, setPlanViewMode] = useState<ViewMode>('week');
@@ -477,6 +433,10 @@ function App() {
 
   useEffect(() => {
     overlayBackAttemptRef.current = () => {
+      if (installGuideOpen) {
+        closeInstallGuide();
+        return true;
+      }
       const galleryResult = newsGalleryBackRef.current?.();
       if (galleryResult === true) return true;
       if (galleryResult === 'consume') return 'consume';
@@ -499,7 +459,7 @@ function App() {
     return () => {
       overlayBackAttemptRef.current = null;
     };
-  }, [planFiltersOpen, planSearchOpen, selectedPlanEvent]);
+  }, [installGuideOpen, closeInstallGuide, planFiltersOpen, planSearchOpen, selectedPlanEvent]);
 
   useEffect(() => {
     if (statsDeepLinkHandledRef.current || !session) return;
@@ -541,7 +501,6 @@ function App() {
   // ── Close drawer on screen change ────────────────────────────────────────
   useEffect(() => {
     setDrawerOpen(false);
-    if (screen !== 'home') setHomeEditing(false);
     if (screen !== 'plan') {
       setPlanFiltersOpen(false);
       setPlanMoreMenuOpen(false);
@@ -590,8 +549,8 @@ function App() {
 
   useEffect(() => {
     const query = window.matchMedia('(prefers-color-scheme: light)');
-    const update = () => applyThemePreference(settings.theme);
-    update(); query.addEventListener('change', update);
+    const update = () => { if (settings.theme === 'system') applyThemePreference('system'); };
+    query.addEventListener('change', update);
     return () => query.removeEventListener('change', update);
   }, [settings.theme]);
 
@@ -1429,8 +1388,8 @@ function App() {
     const activeStudyLabel = studies.find((study) => study.przynaleznoscId === activeStudyId)?.label
       ?? studies[0]?.label
       ?? '';
-    return <HomeScreen key={session?.userId} session={session} studyLabel={activeStudyLabel} isOnline={isOnline} t={t} openScreen={openScreen}
-      editing={homeEditing} onEditing={setHomeEditing} onSearch={(query) => { openScreen('plan'); applyPlanSearch('teacher', query); }} />;
+    return <HomeScreen key={session?.userId} session={session} studyLabel={activeStudyLabel} t={t} openScreen={openScreen}
+      onSearch={(query) => { openScreen('plan'); applyPlanSearch('teacher', query); }} />;
   }
 
   const navigatePlan = (date: string) => setPlanDate(date);
@@ -1533,7 +1492,7 @@ function App() {
   }
 
   function renderAbout() {
-    return <AboutScreen canOfferInstall={canOfferInstall} handleInstallPwa={handleInstallPwa} isIosSafari={isIosSafari} t={t} />;
+    return <AboutScreen canOfferInstall={pwaInstall.canOfferInstall} handleInstallPwa={pwaInstall.install} installBusy={pwaInstall.busy} installDescription={t(`install.target.${pwaInstall.platform.kind}`)} t={t} />;
   }
 
   function renderPlanEventSheet() {
@@ -1605,7 +1564,7 @@ function App() {
   // ── AppBar action buttons ─────────────────────────────────────────────────
   function renderAppBarActions() {
     if (screen === 'login') return null;
-    const actions: Array<{ key: string; icon: string; label: string; onClick: () => void; active: boolean }> = [];
+    const actions: Array<{ key: string; icon: string; label: string; onClick: () => void; active: boolean; disabled?: boolean }> = [];
     const planMenuActions: Array<{ key: string; icon: string; label: string; note: string; onClick: () => void; active: boolean }> = [];
 
     if (screen === 'plan') {
@@ -1692,7 +1651,7 @@ function App() {
         active: false,
       });
     } else if (screen === 'home') {
-      if (!homeEditing) actions.push({ key: 'edit', icon: 'edit', label: 'Edytuj kafelki', onClick: () => setHomeEditing(true), active: false });
+      if (pwaInstall.canOfferInstall) actions.push({ key: 'install', icon: 'install', label: t('install.action'), onClick: () => void pwaInstall.install(), active: false, disabled: pwaInstall.busy });
     } else if (screen === 'grades') {
       actions.push({
         key: 'refresh',
@@ -1763,7 +1722,7 @@ function App() {
         )}
 
         {actions.map(a => (
-          <button key={a.key} type="button" className={`icon-btn ${a.active ? 'active' : ''}`} onClick={a.onClick} aria-label={a.label} title={a.label}>
+          <button key={a.key} type="button" className={`icon-btn ${a.active ? 'active' : ''}`} onClick={a.onClick} disabled={a.disabled} aria-label={a.label} title={a.label}>
             <Ic n={a.icon} />
           </button>
         ))}
@@ -1895,27 +1854,8 @@ function App() {
       {!isOnline && screen !== 'login' && <div className="offline-indicator" role="status"><Ic n="wifi-off" />{settings.language === 'en' ? 'Offline · saved data' : 'Offline · zapisane dane'}</div>}
       {/* Toast */}
       {toast && <div className="toast">{toast}</div>}
-      <PwaUpdateNotice editing={homeEditing} />
-
-      {/* iOS Safari install instructions */}
-      {showIosInstructions && (
-        <Sheet title={t('install.iosTitle')} onClose={() => setShowIosInstructions(false)}>
-            <ol className="ios-inst-steps">
-              <li>
-                <span dangerouslySetInnerHTML={{ __html: t('install.iosStep1') }} />
-              </li>
-              <li>
-                <span dangerouslySetInnerHTML={{ __html: t('install.iosStep2') }} />
-              </li>
-              <li>
-                <span dangerouslySetInnerHTML={{ __html: t('install.iosStep3') }} />
-              </li>
-            </ol>
-            <button type="button" className="ios-inst-close" onClick={() => setShowIosInstructions(false)}>
-              {t('install.iosOk')}
-            </button>
-        </Sheet>
-      )}
+      <PwaUpdateNotice />
+      {installGuideOpen && <PwaInstallSheet platform={pwaInstall.platform} onClose={closeInstallGuide} t={t} />}
 
       {renderPlanEventSheet()}
       {renderPlanSearchSheet()}

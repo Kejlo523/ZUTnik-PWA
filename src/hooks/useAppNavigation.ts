@@ -39,7 +39,8 @@ export function useAppNavigation<TScreen extends string>(
   const idRef = useRef(1);
 
   // Try to load the last screen strictly if it wasn't a manual reset during boot
-  const storedScreen = window.localStorage.getItem(LAST_SCREEN_KEY) as TScreen | null;
+  let storedScreen: TScreen | null = null;
+  try { storedScreen = window.localStorage.getItem(LAST_SCREEN_KEY) as TScreen | null; } catch { /* Navigation still works without persistence. */ }
   const startScreen = (storedScreen && isPersistableScreen(storedScreen) && initialScreen === 'home')
     ? storedScreen
     : initialScreen;
@@ -51,7 +52,7 @@ export function useAppNavigation<TScreen extends string>(
     stackRef.current = stack;
     const currentKey = stack[stack.length - 1].key;
     if (isPersistableScreen(currentKey)) {
-      window.localStorage.setItem(LAST_SCREEN_KEY, currentKey);
+      try { window.localStorage.setItem(LAST_SCREEN_KEY, currentKey); } catch { /* Keep the in-memory stack. */ }
     }
   }, [stack]);
 

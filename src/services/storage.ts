@@ -23,6 +23,13 @@ const LEGACY_SESSION_KEY = 'mzutv2_pwa_session';
 const LEGACY_SETTINGS_KEY = 'mzutv2_pwa_settings';
 const LEGACY_PLAN_FILTERS_KEY = 'mzutv2_pwa_plan_hidden_subjects';
 const LEGACY_DEVICE_ID_KEY = 'mzutv2_pwa_device_id';
+let cacheAccount = 'anonymous';
+let volatileSession: SessionData | null | undefined;
+export function setCacheAccount(userId: string | null | undefined) { cacheAccount = encodeURIComponent(userId || 'anonymous'); }
+export function clearAccountCache(userId: string) {
+  const prefix = `zutnik_usos_c_${encodeURIComponent(userId)}_`;
+  try { for (const key of Object.keys(localStorage)) if (key.startsWith(prefix)) localStorage.removeItem(key); } catch { /* Storage can be disabled by the browser. */ }
+}
 
 export interface AppSettings {
   language: 'pl' | 'en';
@@ -47,6 +54,7 @@ function normalizeThemePreference(value: unknown): AppSettings['theme'] {
 }
 
 export function loadSession(): SessionData | null {
+  if (volatileSession !== undefined) { setCacheAccount(volatileSession?.userId); return volatileSession; }
   try {
     const raw = window.localStorage.getItem(SESSION_KEY) ?? window.localStorage.getItem(LEGACY_SESSION_KEY);
     if (!raw) return null;
@@ -59,26 +67,26 @@ export function loadSession(): SessionData | null {
       parsed.imageUrl = '';
     }
 
-    parsed.persistedAt = Date.now();
-
-    window.localStorage.setItem(SESSION_KEY, JSON.stringify(parsed));
-    window.localStorage.removeItem(LEGACY_SESSION_KEY);
+    setCacheAccount(parsed.userId);
+    if (!window.localStorage.getItem(SESSION_KEY)) {
+      window.localStorage.setItem(SESSION_KEY, JSON.stringify(parsed));
+      window.localStorage.removeItem(LEGACY_SESSION_KEY);
+    }
     return parsed;
   } catch {
     return null;
   }
 }
 
-export function saveSession(session: SessionData | null): void {
-  if (!session) {
-    window.localStorage.removeItem(SESSION_KEY);
-    window.localStorage.removeItem(LEGACY_SESSION_KEY);
-    return;
-  }
-  window.localStorage.setItem(SESSION_KEY, JSON.stringify({
-    ...session,
-    persistedAt: session.persistedAt ?? Date.now(),
-  }));
+export function saveSession(session: SessionData | null): boolean {
+  setCacheAccount(session?.userId);
+  try {
+    if (!session) {
+      window.localStorage.removeItem(SESSION_KEY);
+      window.localStorage.removeItem(LEGACY_SESSION_KEY);
+    } else window.localStorage.setItem(SESSION_KEY, JSON.stringify({ ...session, persistedAt: session.persistedAt ?? Date.now() }));
+    volatileSession = undefined; return true;
+  } catch { volatileSession = session; return false; }
 }
 
 export function loadSettings(): AppSettings {
@@ -102,8 +110,8 @@ export function loadSettings(): AppSettings {
   }
 }
 
-export function saveSettings(settings: AppSettings): void {
-  window.localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+export function saveSettings(settings: AppSettings): boolean {
+  try { window.localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings)); return true; } catch { return false; }
 }
 
 export function loadLegacyPlanHiddenSubjects(): string[] {
@@ -160,17 +168,17 @@ const TTL_MS = {
   courseTests: 6 * 60 * 60_000,
   finance: 24 * 60 * 60_000,
   info: 7 * 24 * 60 * 60_000,
-  plan: 30 * 60_000,
+  plan: 6 * 60 * 60_000,
   news: 24 * 60 * 60_000,
 };
 
 function ck(name: string, suffix = ''): string {
-  return `zutnik_usos_c_${name}${suffix ? `_${suffix}` : ''}`;
+  return `zutnik_usos_c_${name === 'news' ? 'public' : cacheAccount}_${name}${suffix ? `_${suffix}` : ''}`;
 }
 
-function saveC<T>(key: string, data: T): void {
+function saveC<T>(key: string, data: T, ts = Date.now()): void {
   try {
-    const entry: CacheEntry<T> = { data, ts: Date.now() };
+    const entry: CacheEntry<T> = { data, ts };
     window.localStorage.setItem(key, JSON.stringify(entry));
   } catch { /* quota exceeded – ignore */ }
 }
@@ -210,6 +218,8 @@ function loadCTimestamp(key: string): number {
 }
 
 export const cache = {
+  saveCredits: (studyId: string, data: CreditSummary) => saveC(ck('credits', studyId), data),
+  loadCreditsForce: (studyId: string): CreditSummary | null => loadCForce(ck('credits', studyId)),
   // Studies
   saveStudies: (data: Study[]) => saveC(ck('studies'), data),
   loadStudies: (): Study[] | null => loadC(ck('studies'), TTL_MS.studies),
@@ -245,7 +255,7 @@ export const cache = {
     loadCForce(ck('info', studyId)),
 
   // Plan (keyed by viewMode+date+studyId)
-  savePlan: (key: string, data: PlanResult) => saveC(ck('plan', key), data),
+  savePlan: (key: string, data: PlanResult, timestamp?: number) => saveC(ck('plan', key), data, timestamp),
   loadPlan: (key: string): PlanResult | null => loadC(ck('plan', key), TTL_MS.plan),
   loadPlanForce: (key: string): PlanResult | null => loadCForce(ck('plan', key)),
   loadPlanTimestamp: (key: string): number => loadCTimestamp(ck('plan', key)),

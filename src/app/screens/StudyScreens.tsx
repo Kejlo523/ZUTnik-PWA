@@ -14,132 +14,12 @@ import type {
 import type { AppSettings } from '../../services/storage';
 import type { GroupedGradeView, TranslateFn } from '../viewTypes';
 import { fmtDec, gradeCorrectionLabel, gradeTone, initials, isFinalGradeType } from '../helpers';
-import { Ic, Skeleton } from '../ui';
-
-function GradesLoadingSkeleton() {
-  return (
-    <>
-      <div className="grades-header-wrapper">
-        <div className="grades-hero skeleton-panel">
-          <div className="metrics-row">
-            {[0, 1, 2].map((idx) => (
-              <div key={idx} className="metric-card metric-card-skeleton">
-                <Skeleton className="skeleton-line skeleton-line-xs" style={{ width: idx === 1 ? '58%' : '46%' }} />
-                <Skeleton className="skeleton-line skeleton-line-lg" style={{ width: idx === 2 ? '42%' : '64%' }} />
-              </div>
-            ))}
-          </div>
-        </div>
-
-      </div>
-
-      <div className="grades-surface">
-        <div className="list-stack grades-skeleton-list">
-          {Array.from({ length: 4 }).map((_, idx) => (
-            <div key={idx} className="grade-group grade-group-skeleton">
-              <div className="grade-group-head">
-                <div className="grade-group-head-main">
-                  <Skeleton className="skeleton-circle grade-group-icon-skeleton" />
-                  <div className="grade-group-name-wrap grade-group-name-wrap-skeleton">
-                    <Skeleton className="skeleton-line skeleton-line-md" style={{ width: idx % 2 === 0 ? '72%' : '61%' }} />
-                    <Skeleton className="skeleton-line skeleton-line-xs" style={{ width: '38%' }} />
-                  </div>
-                </div>
-
-                <div className="grade-group-side">
-                  <div className="grade-group-summary">
-                    <Skeleton className="skeleton-pill grade-group-pill-skeleton" />
-                    <Skeleton className="skeleton-line skeleton-line-xs" style={{ width: '68px' }} />
-                  </div>
-                  <Skeleton className="skeleton-circle grade-chevron-skeleton" />
-                </div>
-              </div>
-
-              <div className="grade-group-items grade-group-items-skeleton">
-                {[0, 1].map((row) => (
-                  <div key={row} className="grade-row">
-                    <Skeleton className="skeleton-circle grade-pill-skeleton" />
-                    <div className="grade-info">
-                      <Skeleton className="skeleton-pill grade-type-chip-skeleton" style={{ width: row === 0 ? '112px' : '96px' }} />
-                      <Skeleton className="skeleton-line skeleton-line-sm" style={{ width: row === 0 ? '48%' : '56%' }} />
-                      <Skeleton className="skeleton-line skeleton-line-xs" style={{ width: '34%' }} />
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
-    </>
-  );
-}
+import { Ic, Select } from '../ui';
+import { FinanceLoadingSkeleton, GradeMetrics, GradesLoadingSkeleton, InfoMainLoadingSkeleton } from './ScreenLoaders';
+import { useLoadingReveal } from '../../hooks/useLoadingReveal';
 
 type FinanceFilterKey = 'all' | 'due' | 'paid' | 'overpaid';
 type FinanceStatusKey = 'due' | 'paid' | 'overpaid' | 'unknown';
-
-function FinanceLoadingSkeleton() {
-  return (
-    <>
-      <div className="finance-header-wrapper">
-        <div className="finance-hero skeleton-panel">
-          <Skeleton className="skeleton-line skeleton-line-sm" style={{ width: '88%' }} />
-          <div className="metrics-row">
-            {Array.from({ length: 4 }).map((_, idx) => (
-              <div key={idx} className="metric-card metric-card-skeleton">
-                <Skeleton className="skeleton-line skeleton-line-xs" style={{ width: '54%' }} />
-                <Skeleton className="skeleton-line skeleton-line-lg" style={{ width: idx % 2 === 0 ? '66%' : '52%' }} />
-              </div>
-            ))}
-          </div>
-        </div>
-
-        <div className="finance-filters-container skeleton-panel">
-          <div className="field-label skeleton-field">
-            <Skeleton className="skeleton-line skeleton-line-xs" style={{ width: '34%' }} />
-            <Skeleton className="skeleton-block skeleton-input" />
-          </div>
-          <div className="finance-filter-pills finance-filter-pills-skeleton">
-            {Array.from({ length: 4 }).map((_, idx) => (
-              <Skeleton key={idx} className="skeleton-pill finance-filter-pill-skeleton" />
-            ))}
-          </div>
-        </div>
-      </div>
-
-      <div className="finance-surface">
-        <div className="list-stack finance-list">
-          {Array.from({ length: 3 }).map((_, idx) => (
-            <div key={idx} className="finance-record-card finance-record-card-skeleton">
-              <div className="finance-record-top">
-                <div className="finance-record-heading">
-                  <Skeleton className="skeleton-line skeleton-line-md" style={{ width: idx % 2 === 0 ? '72%' : '58%' }} />
-                  <Skeleton className="skeleton-pill finance-status-skeleton" />
-                </div>
-              </div>
-              <div className="finance-record-metrics">
-                {Array.from({ length: 2 }).map((__, metricIdx) => (
-                  <div key={metricIdx} className="metric-card metric-card-skeleton">
-                    <Skeleton className="skeleton-line skeleton-line-xs" style={{ width: '42%' }} />
-                    <Skeleton className="skeleton-line skeleton-line-lg" style={{ width: metricIdx === 0 ? '60%' : '48%' }} />
-                  </div>
-                ))}
-              </div>
-              <div className="finance-meta-card finance-meta-card-skeleton">
-                {Array.from({ length: 3 }).map((__, rowIdx) => (
-                  <div key={rowIdx} className="finance-meta-row">
-                    <Skeleton className="skeleton-line skeleton-line-xs" style={{ width: '28%' }} />
-                    <Skeleton className="skeleton-line skeleton-line-sm" style={{ width: rowIdx === 0 ? '32%' : '44%' }} />
-                  </div>
-                ))}
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
-    </>
-  );
-}
 
 function getFinanceStatus(record: FinanceRecord): FinanceStatusKey {
   if (record.balanceValue < -0.0001) return 'due';
@@ -226,16 +106,16 @@ function formatFinanceMoneyText(value: string | null): string {
   return normalized;
 }
 
-function formatFinanceValue(value: number): string {
+function formatFinanceValue(value: number, language: AppSettings['language']): string {
   const hasFraction = Math.abs(value - Math.round(value)) > 0.0001;
-  return `${new Intl.NumberFormat(undefined, {
+  return `${new Intl.NumberFormat(language === 'en' ? 'en-GB' : 'pl-PL', {
     minimumFractionDigits: hasFraction ? 2 : 0,
     maximumFractionDigits: 2,
   }).format(value)} zł`;
 }
 
-function formatFinanceNoticeDate(timestamp: number): string {
-  return new Intl.DateTimeFormat(undefined, {
+function formatFinanceNoticeDate(timestamp: number, language: AppSettings['language']): string {
+  return new Intl.DateTimeFormat(language === 'en' ? 'en-GB' : 'pl-PL', {
     dateStyle: 'long',
     timeStyle: 'short',
   }).format(new Date(timestamp));
@@ -327,48 +207,6 @@ function formatNullableNumber(value: number | null | undefined, fractionDigits =
   }).format(value);
 }
 
-function InfoMainLoadingSkeleton() {
-  return (
-    <div className="info-main">
-      <div className="info-card info-card-skeleton">
-        {Array.from({ length: 6 }).map((_, idx) => (
-          <div key={idx} className="info-row">
-            <Skeleton className="skeleton-line skeleton-line-xs info-row-label-skeleton" />
-            <Skeleton className="skeleton-line skeleton-line-sm" style={{ width: idx % 2 === 0 ? '56%' : '68%' }} />
-          </div>
-        ))}
-      </div>
-
-      <div className="info-card info-card-skeleton">
-        <div className="info-card-head">
-          <Skeleton className="skeleton-line skeleton-line-sm" style={{ width: '136px' }} />
-        </div>
-        {Array.from({ length: 3 }).map((_, idx) => (
-          <div key={idx} className="history-row">
-            <Skeleton className="skeleton-line skeleton-line-sm" style={{ width: idx === 0 ? '46%' : '58%' }} />
-            <Skeleton className="skeleton-pill info-history-status-skeleton" style={{ width: idx === 1 ? '88px' : '72px' }} />
-          </div>
-        ))}
-      </div>
-
-      <div className="info-card info-card-skeleton">
-        <div className="info-card-head">
-          <Skeleton className="skeleton-line skeleton-line-sm" style={{ width: '164px' }} />
-        </div>
-        {Array.from({ length: 3 }).map((_, idx) => (
-          <div key={idx} className="history-row info-calendar-row-skeleton">
-            <div className="info-calendar-copy-skeleton">
-              <Skeleton className="skeleton-line skeleton-line-sm" style={{ width: idx === 2 ? '64%' : '78%' }} />
-              <Skeleton className="skeleton-line skeleton-line-xs" style={{ width: '42%' }} />
-            </div>
-            <Skeleton className="skeleton-pill info-calendar-pill-skeleton" style={{ width: idx === 1 ? '84px' : '60px' }} />
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
 interface GradesScreenProps {
   t: TranslateFn;
   gradesSummary: { avg: string; ectsSem: string; ectsTotal: string };
@@ -381,170 +219,85 @@ interface GradesScreenProps {
 }
 
 export function GradesScreen({
-  t,
-  gradesSummary,
-  gradesLoading,
-  grades,
-  settings,
-  groupedGrades,
-  expandedGradeSubjects,
-  setExpandedGradeSubjects,
+  t, gradesSummary, gradesLoading, grades, settings, groupedGrades,
+  expandedGradeSubjects, setExpandedGradeSubjects,
 }: GradesScreenProps) {
-  const showGradesSkeleton = gradesLoading && grades.length === 0;
-  const gradeText = (grade: string, fallbackKey: 'grades.missingGrade' | 'grades.missingGradeShort' = 'grades.missingGradeShort') => (
-    grade.trim() || t(fallbackKey)
-  );
-  const gradeTypeText = (grade: Grade) => (
-    isFinalGradeType(grade.type, grade.subjectName) ? t('grades.finalGrade') : (grade.type || t('grades.component'))
-  );
-  const hasVisibleGradeContent = settings.gradesGrouping ? groupedGrades.length > 0 : grades.length > 0;
-
-  return (
-    <section className="screen grades-screen">
-      {showGradesSkeleton ? (
-        <GradesLoadingSkeleton />
-      ) : (
-        <>
-          <div className="grades-header-wrapper">
-            <div className="grades-hero">
-              <div className="metrics-row">
-                <div className="metric-card"><div className="metric-label">{t('grades.avg')}</div><div className="metric-value">{gradesSummary.avg}</div></div>
-                <div className="metric-card"><div className="metric-label">{t('grades.ectsSem')}</div><div className="metric-value">{gradesSummary.ectsSem}</div></div>
-                <div className="metric-card"><div className="metric-label">{t('grades.ectsTotal')}</div><div className="metric-value">{gradesSummary.ectsTotal}</div></div>
-              </div>
-            </div>
-          </div>
-
-          <div className="grades-surface">
-            {!gradesLoading && !hasVisibleGradeContent && (
-              <div className="empty-state"><div className="empty-state-icon">🎓</div><p>{t('grades.noGrades')}</p></div>
-            )}
-
-            <div className="list-stack">
-              {settings.gradesGrouping ? (
-                groupedGrades.map(({ subject, items, finalGrade, ects, emptyFromPlanFilter }) => {
-                  const isOpen = !!expandedGradeSubjects[subject];
-                  const visibleItems = items;
-                  const canExpand = visibleItems.length > 0;
-                  const previewItems = visibleItems.slice(0, 3);
-                  const previewOverflow = Math.max(0, visibleItems.length - previewItems.length);
-                  const hasFinalGrade = !!finalGrade.trim();
-                  return (
-                    <div key={subject} className={`grade-group${isOpen ? ' is-open' : ''}${emptyFromPlanFilter ? ' is-empty-from-plan' : ''}`}>
-                      <button
-                        type="button"
-                        className={`grade-group-head${!canExpand ? ' no-expand' : ''}`}
-                        onClick={() => {
-                          if (!canExpand) return;
-                          setExpandedGradeSubjects((prev) => ({ ...prev, [subject]: !prev[subject] }));
-                        }}
-                        aria-expanded={canExpand ? isOpen : false}
-                        aria-disabled={!canExpand}
-                      >
-                        <div className="grade-group-head-main">
-                          <div className="grade-group-icon"><Ic n="grade" /></div>
-                          <div className="grade-group-name-wrap">
-                            <div className="grade-group-name">{subject}</div>
-                          </div>
-                        </div>
-                        <div className="grade-group-side">
-                          {emptyFromPlanFilter ? (
-                            <div className="grade-group-summary">
-                              <div className="grade-group-pill neutral">-</div>
-                              <div className="grade-group-summary-copy">
-                                <span>{t('grades.noGradesShort')}</span>
-                              </div>
-                            </div>
-                          ) : (hasFinalGrade || ects > 0) && (
-                            <div className="grade-group-summary">
-                              {hasFinalGrade && <div className={`grade-group-pill ${gradeTone(finalGrade)}`}>{gradeText(finalGrade)}</div>}
-                              <div className="grade-group-summary-copy">
-                                {hasFinalGrade && <span>{t('grades.finalGrade')}</span>}
-                                {ects > 0 && <span>{fmtDec(ects, 1)} ECTS</span>}
-                              </div>
-                            </div>
-                          )}
-                          {canExpand && <div className={`grade-group-chevron ${isOpen ? 'open' : ''}`}><Ic n="chevR" /></div>}
-                        </div>
-                      </button>
-
-                      {canExpand && (
-                        <div className={`grade-group-preview${isOpen ? ' is-collapsed' : ''}`} aria-hidden={isOpen}>
-                          {previewItems.map((g, i) => (
-                            <span key={`${subject}-preview-${i}`} className="grade-preview-item">
-                              <span className="grade-preview-type">{gradeTypeText(g)}</span>
-                              <span className="grade-preview-value">
-                                <span className={`grade-preview-pill ${gradeTone(g.grade)}`}>
-                                  {g.grade.trim() || '–'}
-                                </span>
-                                {gradeCorrectionLabel(g) && (
-                                  <span className="grade-correction-note">{gradeCorrectionLabel(g)}</span>
-                                )}
-                              </span>
-                            </span>
-                          ))}
-                          {previewOverflow > 0 && (
-                            <span className="grade-preview-pill count">+{previewOverflow}</span>
-                          )}
-                        </div>
-                      )}
-
-                      {canExpand && (
-                        <div className={`grade-group-items-wrap ${isOpen ? 'open' : ''}`} aria-hidden={!isOpen}>
-                          <div className="grade-group-items">
-                            {visibleItems.map((g, i) => (
-                              <div key={`${subject}-${i}`} className="grade-row">
-                                <span className="grade-value-stack">
-                                  <span className={`grade-pill ${gradeTone(g.grade)}`}>{g.grade.trim() || '–'}</span>
-                                  {gradeCorrectionLabel(g) && <span className="grade-correction-note">{gradeCorrectionLabel(g)}</span>}
-                                </span>
-                                <div className="grade-info">
-                                  <div className="grade-type-chip">{gradeTypeText(g)}</div>
-                                  {g.date && <div className="grade-date-teacher">{g.date}</div>}
-                                  {g.teacher && <div className="grade-date-teacher grade-date-teacher-secondary">{g.teacher}</div>}
-                                </div>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  );
-                })
-              ) : (
-                <div className="grade-group">
-                  {grades.map((g, i) => (
-                    <div key={`flat-${i}-${g.subjectName}`} className="grade-row grade-row-flat">
-                      <div className="grade-flat-top">
-                        <div className="grade-flat-subject">{g.subjectName || t('grades.subject')}</div>
-                        <span className="grade-value-stack">
-                          <span className={`grade-pill ${gradeTone(g.grade)}`}>{g.grade.trim() || '–'}</span>
-                          {gradeCorrectionLabel(g) && <span className="grade-correction-note">{gradeCorrectionLabel(g)}</span>}
-                        </span>
-                      </div>
-                      <div className="grade-flat-meta">
-                        <div className="grade-type-chip">{gradeTypeText(g)}</div>
-                        {(g.date || g.teacher) && (
-                          <div className="grade-date-teacher">
-                            {g.date || '–'}{g.teacher ? ` · ${g.teacher}` : ''}
-                          </div>
-                        )}
-                        {g.weight > 0 && <div className="grade-ects-chip">{fmtDec(g.weight, 1)} ECTS</div>}
-                      </div>
-                    </div>
-                  ))}
+  const showSkeleton = gradesLoading && grades.length === 0;
+  const revealRef = useLoadingReveal<HTMLDivElement>(showSkeleton);
+  const gradeText = (grade: string) => grade.trim() || t('grades.missingGradeShort');
+  const gradeTypeText = (grade: Grade) => isFinalGradeType(grade.type, grade.subjectName)
+    ? t('grades.finalGrade') : grade.type || t('grades.component');
+  const shortType = (grade: Grade) => {
+    const type = gradeTypeText(grade);
+    if (/lab/i.test(type)) return 'Lab';
+    if (/wyk|lecture/i.test(type)) return t('grades.lectureShort');
+    if (/ćw|cw|exercise/i.test(type)) return t('grades.exerciseShort');
+    return type;
+  };
+  const hasContent = settings.gradesGrouping ? groupedGrades.length > 0 : grades.length > 0;
+  return <section className="screen grades-screen" aria-busy={gradesLoading}>
+    <GradeMetrics summary={gradesSummary} t={t} />
+    {showSkeleton ? <GradesLoadingSkeleton /> : <div className="grades-surface" ref={revealRef}>
+      {!gradesLoading && !hasContent && <div className="empty-state"><Ic n="grade" /><p>{t('grades.noGrades')}</p></div>}
+      <div className="list-stack">
+        {settings.gradesGrouping ? groupedGrades.map(({ subject, items, finalGrade, ects, emptyFromPlanFilter }) => {
+          const isOpen = !!expandedGradeSubjects[subject];
+          const canExpand = items.length > 0;
+          const previewItems = items.slice(0, 3);
+          const overflow = Math.max(0, items.length - previewItems.length);
+          const hasCorrection = previewItems.some((grade) => !!gradeCorrectionLabel(grade));
+          const hasFinal = !!finalGrade.trim();
+          return <div className="grade-subject" key={subject}>
+            <button type="button" className={`grade-group${isOpen ? ' is-open' : ''}${emptyFromPlanFilter ? ' is-empty-from-plan' : ''}`}
+              onClick={() => { if (canExpand) setExpandedGradeSubjects((prev) => ({ ...prev, [subject]: !prev[subject] })); }}
+              aria-expanded={canExpand && isOpen} aria-controls={canExpand ? `grade-details-${encodeURIComponent(subject)}` : undefined} aria-disabled={!canExpand}>
+              <div className={`grade-group-head${canExpand ? '' : ' no-expand'}`}>
+                <div className="grade-group-head-main"><div className="grade-group-name">{subject}</div></div>
+                <div className="grade-group-side">
+                  {emptyFromPlanFilter ? <div className="grade-group-summary"><div className="grade-group-pill neutral">-</div><div className="grade-group-summary-copy"><span>{t('grades.noGradesShort')}</span></div></div>
+                    : (hasFinal || ects > 0) && <div className="grade-group-summary">
+                      {hasFinal && <div className={`grade-group-pill ${gradeTone(finalGrade)}`}>{gradeText(finalGrade)}</div>}
+                      <div className="grade-group-summary-copy">{hasFinal && <span>{t('grades.finalGrade')}</span>}{ects > 0 && <span>{fmtDec(ects, 1)} ECTS</span>}</div>
+                    </div>}
+                  {canExpand && <div className={`grade-group-chevron ${isOpen ? 'open' : ''}`}><Ic n="chevR" /></div>}
                 </div>
-              )}
-            </div>
+              </div>
+              {canExpand && <div className="grade-group-preview">
+                {previewItems.map((grade, index) => <span key={index} className="grade-preview-item">
+                  <span className="grade-preview-type" title={gradeTypeText(grade)}>{shortType(grade)}</span>
+                  <span className={`grade-preview-pill ${gradeTone(grade.grade)}`}>{gradeText(grade.grade)}</span>
+                  {hasCorrection && <span className={`grade-preview-correction${gradeCorrectionLabel(grade) ? '' : ' is-placeholder'}`}>{gradeCorrectionLabel(grade) || '\u00a0'}</span>}
+                </span>)}
+                {overflow > 0 && <span className="grade-preview-item"><span className="grade-preview-type is-placeholder" /><span className="grade-preview-pill count">+{overflow}</span>{hasCorrection && <span className="grade-preview-correction is-placeholder" />}</span>}
+              </div>}
+            </button>
+            {canExpand && <div id={`grade-details-${encodeURIComponent(subject)}`} className={`grade-group-items-wrap ${isOpen ? 'open' : ''}`} hidden={!isOpen}>
+              <div className="grade-group-items">{items.map((grade, index) => <div key={index} className="grade-row">
+                <span className={`grade-pill ${gradeTone(grade.grade)}`}>{gradeText(grade.grade)}</span>
+                <div className="grade-info"><div className="grade-type-chip">{gradeTypeText(grade)}</div>
+                  {gradeCorrectionLabel(grade) && <span className="grade-correction-note">{gradeCorrectionLabel(grade)}</span>}
+                  {grade.date && <div className="grade-date-teacher">{grade.date}</div>}
+                  {grade.teacher && <div className="grade-date-teacher grade-date-teacher-secondary">{grade.teacher}</div>}
+                </div>
+              </div>)}</div>
+            </div>}
+          </div>;
+        }) : grades.map((grade, index) => <div key={`flat-${index}-${grade.subjectName}`} className="grade-row grade-row-flat">
+          <div className="grade-flat-top"><div className="grade-flat-subject">{grade.subjectName || t('grades.subject')}</div><span className={`grade-pill ${gradeTone(grade.grade)}`}>{gradeText(grade.grade)}</span></div>
+          <div className="grade-flat-meta"><div className="grade-type-chip">{gradeTypeText(grade)}</div>
+            {gradeCorrectionLabel(grade) && <span className="grade-correction-note">{gradeCorrectionLabel(grade)}</span>}
+            {(grade.date || grade.teacher) && <div className="grade-date-teacher">{grade.date || '–'}{grade.teacher ? ` · ${grade.teacher}` : ''}</div>}
+            {grade.weight > 0 && <div className="grade-ects-chip">{fmtDec(grade.weight, 1)} ECTS</div>}
           </div>
-        </>
-      )}
-    </section>
-  );
+        </div>)}
+      </div>
+    </div>}
+  </section>;
 }
 
 interface FinanceScreenProps {
   t: TranslateFn;
+  language: AppSettings['language'];
   studies: Study[];
   activeStudyId: string | null;
   updateActiveStudy: (studyId: string | null) => void;
@@ -557,6 +310,7 @@ interface FinanceScreenProps {
 
 export function FinanceScreen({
   t,
+  language,
   studies,
   activeStudyId,
   updateActiveStudy,
@@ -595,8 +349,9 @@ export function FinanceScreen({
   ), [financeRecords, filter]);
 
   const showSkeleton = financeLoading && financeRecords.length === 0;
+  const revealRef = useLoadingReveal<HTMLElement>(showSkeleton);
   const noticeDateText = financeFetchedAt > 0
-    ? formatFinanceNoticeDate(financeFetchedAt)
+    ? formatFinanceNoticeDate(financeFetchedAt, language)
     : t('finance.noticeLoading');
   const noticeMain = t('finance.noticeMain').replace('{{date}}', noticeDateText);
 
@@ -634,7 +389,7 @@ export function FinanceScreen({
   })();
 
   return (
-    <section className={`screen finance-screen${noticeOpen ? ' notice-open' : ''}`}>
+    <section ref={revealRef} className={`screen finance-screen${noticeOpen ? ' notice-open' : ''}`} aria-busy={financeLoading}>
       {showSkeleton ? (
         <FinanceLoadingSkeleton />
       ) : (
@@ -660,11 +415,11 @@ export function FinanceScreen({
               <div className="metrics-row finance-summary-grid">
                 <div className="metric-card">
                   <div className="metric-label">{t('finance.summaryDue')}</div>
-                  <div className="metric-value">{formatFinanceValue(summary.dueTotal)}</div>
+                  <div className="metric-value">{formatFinanceValue(summary.dueTotal, language)}</div>
                 </div>
                 <div className="metric-card">
                   <div className="metric-label">{t('finance.summaryPaid')}</div>
-                  <div className="metric-value">{formatFinanceValue(summary.paidTotal)}</div>
+                  <div className="metric-value">{formatFinanceValue(summary.paidTotal, language)}</div>
                 </div>
                 <div className="metric-card">
                   <div className="metric-label">{t('finance.summaryOpen')}</div>
@@ -672,7 +427,7 @@ export function FinanceScreen({
                 </div>
                 <div className="metric-card">
                   <div className="metric-label">{t('finance.summaryOverpaid')}</div>
-                  <div className="metric-value">{formatFinanceValue(summary.overpaidTotal)}</div>
+                  <div className="metric-value">{formatFinanceValue(summary.overpaidTotal, language)}</div>
                 </div>
               </div>
             </div>
@@ -681,13 +436,13 @@ export function FinanceScreen({
               {studies.length > 0 && (
                 <label className="field-label">
                   {t('finance.studyField')}
-                  <select value={activeStudyId ?? ''} onChange={(e) => updateActiveStudy(e.target.value || null)}>
+                  <Select value={activeStudyId ?? ''} onChange={(e) => updateActiveStudy(e.target.value || null)}>
                     {studies.map((study) => (
                       <option key={study.przynaleznoscId} value={study.przynaleznoscId}>
                         {study.label}
                       </option>
                     ))}
-                  </select>
+                  </Select>
                 </label>
               )}
 
@@ -702,6 +457,8 @@ export function FinanceScreen({
                     key={item.key}
                     type="button"
                     className={`finance-filter-pill ${filter === item.key ? 'active' : ''}`}
+                    role="tab"
+                    aria-selected={filter === item.key}
                     onClick={() => setFilter(item.key)}
                   >
                     {item.label}
@@ -853,154 +610,43 @@ interface InfoScreenProps {
   els: ElsCard | null;
   calendarEvents: CalendarEvent[];
   credits: CreditSummary | null;
+  onRefresh: () => void;
 }
 
 export function InfoScreen({
-  session,
-  studies,
-  activeStudyId,
-  updateActiveStudy,
-  studentPhotoBlobUrl,
-  studentPhotoError,
-  t,
-  infoLoading,
-  details,
-  history,
-  els,
-  calendarEvents,
-  credits,
+  session, studies, activeStudyId, updateActiveStudy, studentPhotoBlobUrl, studentPhotoError,
+  t, infoLoading, details, history, els, calendarEvents, credits, onRefresh,
 }: InfoScreenProps) {
   const hasSideColumn = !!session || studies.length > 0;
-  const showInfoSkeleton = infoLoading && !details && history.length === 0 && !els && calendarEvents.length === 0;
-
-  return (
-    <section className={`screen info-screen${hasSideColumn ? '' : ' info-screen-full'}`}>
-      {hasSideColumn && (
-        <aside className="info-side">
-          {session && (
-            <div className="info-profile-card">
-              {studentPhotoBlobUrl && !studentPhotoError ? (
-                <img
-                  src={studentPhotoBlobUrl}
-                  alt={t('info.photoAlt')}
-                  className="info-profile-photo"
-                />
-              ) : (
-                <div className="info-profile-fallback">{initials(session.username || 'S')}</div>
-              )}
-              <div className="info-profile-meta">
-                <div className="info-profile-name">{session.username || t('info.studentNameFallback')}</div>
-                <div className="info-profile-id">{t('info.userId')}: {session.userId || '-'}</div>
-              </div>
-            </div>
-          )}
-
-          {studies.length > 0 && (
-            <label className="field-label info-study-select">
-              {t('info.studyField')}
-              <select value={activeStudyId ?? ''} onChange={(e) => updateActiveStudy(e.target.value || null)}>
-                {studies.map((s) => <option key={s.przynaleznoscId} value={s.przynaleznoscId}>{s.label}</option>)}
-              </select>
-            </label>
-          )}
-        </aside>
-      )}
-
-      {showInfoSkeleton ? (
-        <InfoMainLoadingSkeleton />
-      ) : (
-        <div className="info-main">
-          {details && (
-            <div className="info-card">
-              {([
-                { l: t('info.detailAlbum'), v: details.album },
-                { l: t('info.detailFaculty'), v: details.wydzial },
-                { l: t('info.detailField'), v: details.kierunek },
-                { l: t('info.detailForm'), v: details.forma },
-                { l: t('info.detailLevel'), v: details.poziom },
-                { l: t('info.detailSpecialty'), v: details.specjalnosc },
-                { l: t('info.detailSpecialization'), v: details.specjalizacja },
-                { l: t('info.detailStatus'), v: details.status },
-                { l: t('info.detailYear'), v: details.rokAkademicki },
-                { l: t('info.detailSem'), v: details.semestrLabel },
-              ].filter((r) => r.v)).map((r) => (
-                <div key={r.l} className="info-row">
-                  <div className="info-row-label">{r.l}</div>
-                  <div className="info-row-value">{r.v}</div>
-                </div>
-              ))}
-            </div>
-          )}
-          {credits && (credits.programmeUsed !== null || credits.overallUsed !== null) && (
-            <div className="info-card ects-card">
-              <div className="info-card-head">{t('info.ectsProgress')}</div>
-              <div className="ects-metrics">
-                <div className="ects-metric">
-                  <div className="metric-label">{t('info.ectsProgramme')}</div>
-                  <div className="metric-value">{formatNullableNumber(credits.programmeUsed)} ECTS</div>
-                </div>
-                <div className="ects-metric">
-                  <div className="metric-label">{t('info.ectsOverall')}</div>
-                  <div className="metric-value">{formatNullableNumber(credits.overallUsed)} ECTS</div>
-                </div>
-              </div>
-            </div>
-          )}
-          {history.length > 0 && (
-            <div className="info-card info-history-card">
-              <div className="info-card-head">{t('info.studyHistory')}</div>
-              {history.map((h, i) => (
-                <div key={i} className="history-row">
-                  <span className="history-label">{h.label}</span>
-                  <span className="history-status">{h.status}</span>
-                </div>
-              ))}
-            </div>
-          )}
-
-          {els && (
-            <div className="info-card">
-              <div className="info-card-head">Legitymacja Elektroniczna (ELS)</div>
-              <div className="info-row">
-                <div className="info-row-label">Status</div>
-                <div className="info-row-value">
-                  <span className={`grade-pill ${els.isActive ? 'ok' : 'bad'}`} style={{ padding: '4px 8px', fontSize: '13px' }}>
-                    {els.isActive ? 'Aktywna' : 'Nieaktywna'}
-                  </span>
-                </div>
-              </div>
-              <div className="info-row">
-                <div className="info-row-label">Ważna do</div>
-                <div className="info-row-value">{els.expirationDate}</div>
-              </div>
-            </div>
-          )}
-
-          {calendarEvents.length > 0 && (
-            <div className="info-card">
-              <div className="info-card-head">Kalendarz Akademicki (30 dni)</div>
-              {calendarEvents.map((ev, i) => (
-                <div key={i} className="history-row" style={{ alignItems: 'flex-start', padding: '12px 16px' }}>
-                  <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                    <div className="history-label">{ev.name}</div>
-                    <div className="history-status" style={{ fontSize: '12px', opacity: 0.8, textAlign: 'left' }}>
-                      {ev.startDate === ev.endDate ? ev.startDate : `${ev.startDate} – ${ev.endDate}`}
-                    </div>
-                  </div>
-                  {ev.isDayOff && (
-                    <span className="grade-pill ok" style={{ padding: '2px 6px', fontSize: '11px', alignSelf: 'center' }}>
-                      Dzień wolny
-                    </span>
-                  )}
-                </div>
-              ))}
-            </div>
-          )}
-          {!infoLoading && !details && (
-            <div className="empty-state"><div className="empty-state-icon">👤</div><p>{t('info.empty')}</p></div>
-          )}
-        </div>
-      )}
-    </section>
-  );
+  const showSkeleton = infoLoading && !details && history.length === 0 && !els && calendarEvents.length === 0;
+  const revealRef = useLoadingReveal<HTMLDivElement>(showSkeleton);
+  const row = (label: string, value: string, className = '') => <div className="info-row" key={label}><div className="info-row-label">{label}</div><div className={`info-row-value ${className}`}>{value || '–'}</div></div>;
+  return <section className={`screen info-screen${hasSideColumn ? '' : ' info-screen-full'}`} aria-busy={infoLoading}>
+    {hasSideColumn && <aside className="info-side">
+      {session && <div className="info-profile-card">
+        {studentPhotoBlobUrl && !studentPhotoError ? <img src={studentPhotoBlobUrl} alt={t('info.photoAlt')} className="info-profile-photo" /> : <div className="info-profile-fallback">{initials(session.username || 'S')}</div>}
+        <div className="info-profile-meta"><div className="info-profile-eyebrow">{t('screen.info')}</div><div className="info-profile-name">{session.username || t('info.studentNameFallback')}</div><div className="info-profile-id">{t('info.detailAlbum')}: {details?.album || session.userId || '–'}</div></div>
+        <button className="icon-btn info-refresh-btn" onClick={onRefresh} disabled={infoLoading} aria-label={t('plan.refresh')} title={t('plan.refresh')}><Ic n="refresh" /></button>
+      </div>}
+      {studies.length > 0 && <label className="field-label info-study-select">{t('info.studyField')}<Select value={activeStudyId ?? ''} onChange={(event) => updateActiveStudy(event.target.value || null)}>{studies.map((study) => <option key={study.przynaleznoscId} value={study.przynaleznoscId}>{study.label}</option>)}</Select></label>}
+    </aside>}
+    {showSkeleton ? <InfoMainLoadingSkeleton /> : <div className="info-main" ref={revealRef}>
+      {credits && (credits.programmeUsed !== null || credits.overallUsed !== null) && <div className="info-card ects-card"><div className="info-card-head">{t('info.ectsProgress')}</div>
+        {row(t('info.ectsProgramme'), `${formatNullableNumber(credits.programmeUsed)} ECTS`)}
+        {row(t('info.ectsOverall'), `${formatNullableNumber(credits.overallUsed)} ECTS`)}
+      </div>}
+      {els && <div className="info-card"><div className="info-card-head">{t('info.elsTitle')}</div>
+        {row(t('info.detailStatus'), t(els.isActive ? 'info.elsActive' : 'info.elsInactive'), els.isActive ? 'status-success' : 'status-danger')}
+        {row(t('info.elsExpires'), els.expirationDate)}
+        {row(t('info.elsNumber'), els.id)}
+      </div>}
+      {details && <div className="info-card"><div className="info-card-head">{t('info.currentStudies')}</div>
+        {([{ l: t('info.detailAlbum'), v: details.album }, { l: t('info.detailField'), v: details.kierunek }, { l: t('info.detailStatus'), v: details.status }, { l: t('info.detailFaculty'), v: details.wydzial }, { l: t('info.detailForm'), v: details.forma }, { l: t('info.detailLevel'), v: details.poziom }, { l: t('info.detailSpecialty'), v: details.specjalnosc }, { l: t('info.detailSpecialization'), v: details.specjalizacja }].filter((item) => item.v)).map((item) => row(item.l, item.v))}
+        <div className="info-study-term">{details.rokAkademicki && <span>{t('info.detailYear')}: <strong>{details.rokAkademicki}</strong></span>}{details.semestrLabel && <span>{t('info.detailSem')}: <strong>{details.semestrLabel}</strong></span>}</div>
+      </div>}
+      {history.length > 0 && <div className="info-card info-history-card"><div className="info-card-head"><Ic n="grade" />{t('info.studyHistory')}</div>{history.map((item, index) => <div key={index} className="history-row"><span className="history-label">{item.label}</span><span className="history-status">{item.status}</span></div>)}</div>}
+      {calendarEvents.length > 0 && <details className="info-calendar"><summary>{t('info.calendarTitle')}</summary>{calendarEvents.map((event) => <div className="history-row" key={event.id}><div><div className="history-label">{event.name}</div><div className="history-status">{event.startDate === event.endDate ? event.startDate : `${event.startDate} – ${event.endDate}`}</div></div>{event.isDayOff && <span className="status-success">{t('info.dayOff')}</span>}</div>)}</details>}
+      {!infoLoading && !details && !els && !credits && <div className="empty-state"><Ic n="user" /><p>{t('info.empty')}</p></div>}
+    </div>}
+  </section>;
 }

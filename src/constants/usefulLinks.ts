@@ -3,6 +3,7 @@ import type { Study, UsefulLink } from '../types';
 export const USEFUL_LINKS: UsefulLink[] = [
   { id: 'wi_students', title: 'WI - Strefa Studenta', url: 'https://www.wi.zut.edu.pl/pl/dla-studenta', description: 'Plany studiów, dyplomowanie i druki.', scope: 'FACULTY', facultyCode: 'WI' },
   { id: 'wi_home', title: 'Wydział Informatyki (WI)', url: 'https://www.wi.zut.edu.pl', description: 'Strona wydziału i ogłoszenia dziekanatu.', scope: 'FACULTY', facultyCode: 'WI' },
+  { id: 'wi_quiz', title: 'Quizy z informatyki', url: 'https://quiz.endozero.pl', description: 'Quizy i powtórki z informatyki.', scope: 'FACULTY', facultyCode: 'WI' },
   { id: 'global_plan', title: 'Plan zajęć', url: 'https://plan.zut.edu.pl', description: 'Aktualny rozkład zajęć dla studentów.', scope: 'GLOBAL' },
   { id: 'global_usos', title: 'USOSweb / e-dziekanat', url: 'https://usosweb.zut.edu.pl', description: 'Oceny, zapisy i administracja studiów.', scope: 'GLOBAL' },
   { id: 'global_news', title: 'Aktualności ZUT', url: 'https://www.zut.edu.pl', description: 'Komunikaty i ogłoszenia uczelni.', scope: 'GLOBAL' },

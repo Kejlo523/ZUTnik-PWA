@@ -13,6 +13,8 @@ import cors from 'cors';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
 import { createStatsService } from './stats/service.mjs';
+import { createTimetableGateway } from './usos/timetable.mjs';
+import { fetchUserPayments } from './usos/payments.mjs';
 import { createUpstreamHeaders, runWithBrowserUserAgent } from './upstream-browser.mjs';
 import {
   REQUIRED_USOS_SCOPES,
@@ -76,6 +78,10 @@ app.use(cors({ origin: true, credentials: true }));
 app.set('trust proxy', 1);
 app.use(rateLimit({ windowMs: 60_000, limit: 180, standardHeaders: true, legacyHeaders: false }));
 app.use(express.json({ limit: '1mb' }));
+app.use((req, _res, next) => {
+  if (APP_BASE_PATH !== '/' && req.url.startsWith(`${APP_BASE_PATH}/api/`)) req.url = req.url.slice(APP_BASE_PATH.length);
+  next();
+});
 app.use((req, _res, next) => {
   runWithBrowserUserAgent(req.headers['user-agent'], next);
 });
@@ -297,18 +303,13 @@ function setPrivateNoStore(res) {
   res.set('Expires', '0');
 }
 
-async function fetchWithTimeout(url, options = {}) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
-  try {
-    return await fetch(url, {
-      signal: controller.signal,
-      ...options,
-      headers: createUpstreamHeaders(options.headers),
-    });
-  } finally {
-    clearTimeout(timer);
-  }
+async function fetchWithTimeout(url, options = {}, timeoutMs = REQUEST_TIMEOUT_MS) {
+  const timeout = AbortSignal.timeout(timeoutMs);
+  return fetch(url, {
+    ...options,
+    signal: options.signal ? AbortSignal.any([timeout, options.signal]) : timeout,
+    headers: createUpstreamHeaders(options.headers),
+  });
 }
 
 async function passthroughJson(response) {
@@ -614,6 +615,18 @@ async function fetchUsosJson(endpoint, {
   }
 }
 
+const timetableGateway = createTimetableGateway(fetchUsosJson);
+for (const action of ['week', 'catalog', 'group', 'suggest']) {
+  app.post(`/api/usos/timetable/${action}`, async (req, res) => {
+    res.setHeader('Cache-Control', 'no-store');
+    try {
+      const credentials = getUsosCredentials(req);
+      const data = await timetableGateway[action](credentials, req.body);
+      return res.json({ data });
+    } catch (error) { return sendUsosError(res, error); }
+  });
+}
+
 async function fetchUsosTokenScopes(token, secret) {
   const response = await fetchUsosJson('services/apisrv/consumer', {
     token,
@@ -640,7 +653,6 @@ const GRADE_FIELDS = 'value_symbol|passes|value_description|exam_id|exam_session
 const COURSE_FIELDS = 'course_editions[course_id|course_name|term_id]|terms';
 const COURSE_WITH_GRADES_FIELDS = `course_editions[course_id|course_name|term_id|grades[${GRADE_FIELDS}]]|terms`;
 const GRADE_WITH_CONTEXT_FIELDS = `${GRADE_FIELDS}|course_edition[course_id|term_id|course[id|name|ects_credits_simplified]|ects_credits_simplified]|course[id|name|ects_credits_simplified]`;
-const PAYMENT_FIELDS = 'id|name|title|amount|due_date|status|is_paid|saldo_amount|description|state|account_number|payment_deadline|total_amount|currency|debt_type|type|paid_date';
 const CALENDAR_FIELDS = 'id|name|start_date|end_date|type|is_day_off';
 const NEWS_FIELDS = 'items[article[id|publication_date|title|headline_html|content_html|image_urls[720x405|360x203|original]]]|next_page|total';
 const SURVEY_FIELDS = 'id|survey_type|name|headline_html|start_date|end_date|can_i_fill_out|did_i_fill_out|group[course_unit[course_id|course_name|course[id|name]]]|lecturer[id|first_name|last_name]|faculty[id|name]|programme[id|name]';
@@ -1332,12 +1344,7 @@ app.post('/api/usos/course-tests', async (req, res) => {
 app.post('/api/usos/finance', async (req, res) => {
   try {
     const { token, secret } = getUsosCredentials(req);
-    const payments = await fetchUsosJson('services/payments/user_payments', {
-      token,
-      secret,
-      tokenMode: 'required',
-      params: { fields: PAYMENT_FIELDS },
-    });
+    const payments = await fetchUserPayments(fetchUsosJson, { token, secret });
     return res.json({ records: mapFinanceRecords(payments) });
   } catch (error) {
     return sendUsosError(res, error);
@@ -1540,7 +1547,6 @@ function stripHtmlTags(html) {
 
 function parseCalendarHtml(html) {
   const text = stripHtmlTags(html);
-  const dateRe = /(\d{2})\.(\d{2})\.(\d{4})/g;
   const results = [];
   const seen = new Set();
 
@@ -1548,8 +1554,6 @@ function parseCalendarHtml(html) {
   let hasSpecificBreak = false;
 
   for (const period of CALENDAR_PERIODS) {
-    const matches = [];
-    let idx = 0;
     let m;
     // Reset lastIndex if using global
     const re = new RegExp(period.pattern.source, 'gi');
@@ -1584,31 +1588,35 @@ function parseCalendarHtml(html) {
 
 let calendarCache = null;
 let calendarCacheTs = 0;
-const CALENDAR_CACHE_TTL = 6 * 60 * 60 * 1000; // 6h
+let calendarRequest = null;
+let calendarRetryAt = 0;
+const CALENDAR_CACHE_TTL = 7 * 24 * 60 * 60 * 1000;
+
+async function refreshCalendar() {
+  for (const url of CALENDAR_URLS) {
+    try {
+      const response = await fetchWithTimeout(url, {}, 5000);
+      if (!response.ok) continue;
+      const periods = parseCalendarHtml(await response.text());
+      if (periods.length) {
+        calendarCache = periods;
+        calendarCacheTs = Date.now();
+        return periods;
+      }
+    } catch { /* Try the next known calendar page. */ }
+  }
+  calendarRetryAt = Date.now() + 24 * 60 * 60 * 1000;
+  return calendarCache ?? [];
+}
 
 app.get('/api/proxy/calendar', async (_req, res) => {
   try {
     const now = Date.now();
-    if (calendarCache && (now - calendarCacheTs) < CALENDAR_CACHE_TTL) {
-      return res.json({ periods: calendarCache });
+    if ((calendarCache && (now - calendarCacheTs) < CALENDAR_CACHE_TTL) || now < calendarRetryAt) {
+      return res.json({ periods: calendarCache ?? [] });
     }
-
-    for (const url of CALENDAR_URLS) {
-      try {
-        const response = await fetchWithTimeout(url);
-        if (!response.ok) continue;
-        const html = await response.text();
-        if (!html) continue;
-        const periods = parseCalendarHtml(html);
-        if (periods.length > 0) {
-          calendarCache = periods;
-          calendarCacheTs = now;
-          return res.json({ periods });
-        }
-      } catch { /* try next URL */ }
-    }
-
-    return res.json({ periods: calendarCache ?? [] });
+    if (!calendarRequest) calendarRequest = refreshCalendar().finally(() => { calendarRequest = null; });
+    return res.json({ periods: await calendarRequest });
   } catch (error) {
     return res.status(502).json({ error: `Calendar proxy error: ${error.message}`, periods: [] });
   }
@@ -1626,6 +1634,7 @@ app.get([STATS_ROUTE_PATH, `${STATS_ROUTE_PATH}/`], statsAccessLimiter, (req, re
 
 const distPath = path.resolve(process.cwd(), 'dist');
 if (existsSync(distPath)) {
+  if (APP_BASE_PATH !== '/') app.use(APP_BASE_PATH, express.static(distPath));
   app.use(express.static(distPath));
   app.use((req, res, next) => {
     if (req.method !== 'GET') return next();

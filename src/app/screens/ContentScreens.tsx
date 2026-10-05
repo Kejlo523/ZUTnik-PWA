@@ -5,10 +5,12 @@ import { useOverscrollLock } from '../../hooks/useOverscrollLock';
 import type { BackInterceptResult } from '../../hooks/useAppNavigation';
 
 import type { NewsItem, StatsCountShare, StatsSeriesDay, StatsSnapshot, UsefulLink } from '../../types';
-import type { AppSettings } from '../../services/storage';
+import { loadSession, type AppSettings } from '../../services/storage';
+import { parseSettingsBackup } from '../../services/settingsBackup';
+import { loadHomeTiles } from '../../services/homeTiles';
 import type { TranslateFn } from '../viewTypes';
 import { LOGO_SRC } from '../constants';
-import { Ic, Skeleton, Toggle } from '../ui';
+import { Ic, Select, Skeleton, SkeletonRegion, Toggle } from '../ui';
 
 const NEWS_HTML_ALLOWED_TAGS = new Set(['p', 'br', 'strong', 'b', 'em', 'i', 'u', 'ul', 'ol', 'li', 'a', 'img', 'blockquote', 'h2', 'h3', 'h4']);
 const NEWS_HTML_TEXTLESS_TAGS = new Set(['script', 'style', 'iframe', 'object', 'embed', 'form', 'input', 'button', 'svg', 'math']);
@@ -394,7 +396,7 @@ function prepareNewsDetailContent(html: string, fallbackImageUrl = ''): { html: 
 
 function NewsLoadingSkeleton() {
   return (
-    <div className="list-stack news-skeleton-grid">
+    <SkeletonRegion className="list-stack news-skeleton-grid" label="Ładowanie aktualności">
       {Array.from({ length: 6 }).map((_, idx) => (
         <div key={idx} className="news-card news-card-skeleton" aria-hidden>
           <Skeleton className="news-thumb news-thumb-skeleton" />
@@ -406,7 +408,7 @@ function NewsLoadingSkeleton() {
           </div>
         </div>
       ))}
-    </div>
+    </SkeletonRegion>
   );
 }
 
@@ -415,6 +417,12 @@ interface NewsScreenProps {
   news: NewsItem[];
   t: TranslateFn;
   onOpenDetail: (item: NewsItem) => void;
+}
+
+function NewsThumbnail({ src }: { src: string }) {
+  const [failed, setFailed] = useState(false);
+  return src && !failed ? <img src={src} alt="" className="news-thumb" loading="lazy" decoding="async" onError={() => setFailed(true)} />
+    : <div className="news-thumb-placeholder"><Ic n="news" /></div>;
 }
 
 export function NewsScreen({ newsLoading, news, t, onOpenDetail }: NewsScreenProps) {
@@ -430,11 +438,7 @@ export function NewsScreen({ newsLoading, news, t, onOpenDetail }: NewsScreenPro
         <div className="list-stack">
           {news.map((item) => (
             <button key={item.id} type="button" className="news-card" onClick={() => onOpenDetail(item)}>
-              {item.thumbUrl ? (
-                <img src={item.thumbUrl} alt="" className="news-thumb" loading="lazy" onError={(e) => { (e.target as HTMLImageElement).replaceWith(Object.assign(document.createElement('div'), { className: 'news-thumb-placeholder', innerHTML: '<svg viewBox="0 0 24 24" aria-hidden><path fill="currentColor" d="M4 22h16a2 2 0 002-2V4a2 2 0 00-2-2H4a2 2 0 00-2 2v16a2 2 0 002 2zm0 0a2 2 0 01-2-2v-9c0-1.1.9-2 2-2h2"/><path fill="currentColor" d="M18 14h-8M15 18h-5M10 6h8v4h-8z"/></svg>' })); }} />
-              ) : (
-                <div className="news-thumb-placeholder"><Ic n="news" /></div>
-              )}
+              <NewsThumbnail key={item.thumbUrl} src={item.thumbUrl} />
               <div className="news-content">
                 <div className="news-title">{item.title}</div>
                 <div className="news-date">{item.date}</div>
@@ -465,6 +469,7 @@ interface NewsGalleryModalProps {
 type GallerySwipePhase = 'idle' | 'dragging' | 'settling';
 
 function NewsGalleryModal({ images, index, onClose, onNext, onPrev }: NewsGalleryModalProps) {
+  const dialogRef = useRef<HTMLDialogElement>(null);
   const image = images[index];
   const [zoom, setZoom] = useState(1);
   const [swipeState, setSwipeState] = useState<{ dx: number; progress: number; phase: GallerySwipePhase; direction: -1 | 0 | 1 }>({
@@ -481,16 +486,17 @@ function NewsGalleryModal({ images, index, onClose, onNext, onPrev }: NewsGaller
     setSwipeState({ dx: 0, progress: 0, phase: 'idle', direction: 0 });
   };
 
-  useEffect(() => {
-    setZoom(1);
-    resetSwipe();
-  }, [index]);
-
   useOverscrollLock(true);
 
   useEffect(() => {
+    const dialog = dialogRef.current;
+    const previous = document.activeElement as HTMLElement | null;
+    dialog?.showModal();
+    return () => { dialog?.close(); previous?.focus({ preventScroll: true }); };
+  }, []);
+
+  useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onClose();
       if (event.key === 'ArrowRight' && hasMany) onNext();
       if (event.key === 'ArrowLeft' && hasMany) onPrev();
     };
@@ -522,7 +528,7 @@ function NewsGalleryModal({ images, index, onClose, onNext, onPrev }: NewsGaller
       resetSwipe();
       if (direction > 0) onNext();
       else onPrev();
-    }, 260);
+    }, window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 180);
   };
 
   const onTouchStart = (event: TouchEvent<HTMLDivElement>) => {
@@ -612,7 +618,7 @@ function NewsGalleryModal({ images, index, onClose, onNext, onPrev }: NewsGaller
   ].filter(Boolean).join(' ');
 
   return createPortal(
-    <div className="news-gallery-modal" role="dialog" aria-modal="true" onClick={onClose}>
+    <dialog ref={dialogRef} className="news-gallery-modal" aria-label="Galeria zdjęć" onCancel={(event) => { event.preventDefault(); onClose(); }}>
       <div className="news-gallery-surface" onClick={(event) => event.stopPropagation()}>
         <div className="news-gallery-topbar">
           <div className="news-gallery-counter">{index + 1} / {images.length}</div>
@@ -676,7 +682,7 @@ function NewsGalleryModal({ images, index, onClose, onNext, onPrev }: NewsGaller
           ) : null}
         </div>
       </div>
-    </div>,
+    </dialog>,
     document.body,
   );
 }
@@ -786,27 +792,21 @@ interface LinksScreenProps {
 }
 
 export function LinksScreen({ links, t }: LinksScreenProps) {
-  const globals = links.filter((l) => l.scope === 'GLOBAL');
-  const faculties = links.filter((l) => l.scope === 'FACULTY');
-
-  return (
-    <section className="screen links-screen">
-      {faculties.length > 0 && <div className="link-category">{t('links.faculty')}</div>}
-      {faculties.map((l) => (
-        <a key={l.id} href={l.url} target="_blank" rel="noreferrer" className="link-card">
-          <div className="link-card-title">{l.title}</div>
-          <div className="link-card-desc">{l.description}</div>
-        </a>
-      ))}
-      <div className="link-category">{t('links.university')}</div>
-      {globals.map((l) => (
-        <a key={l.id} href={l.url} target="_blank" rel="noreferrer" className="link-card">
-          <div className="link-card-title">{l.title}</div>
-          <div className="link-card-desc">{l.description}</div>
-        </a>
-      ))}
-    </section>
-  );
+  const groups = [
+    { label: t('links.faculty'), items: links.filter((link) => link.scope === 'FACULTY') },
+    { label: t('links.university'), items: links.filter((link) => link.scope === 'GLOBAL') },
+  ];
+  return <section className="screen links-screen">{groups.filter((group) => group.items.length).map((group) => <section className="link-section" key={group.label}>
+    <h2 className="link-category">{group.label}</h2><div className="link-list">{group.items.map((link) => {
+      let domain = link.url;
+      try { domain = new URL(link.url).hostname.replace(/^www\./, ''); } catch { /* Keep the configured address. */ }
+      return <a key={link.id} href={link.url} target="_blank" rel="noreferrer" className="link-card">
+        <span className="link-thumb" aria-hidden="true">{link.title.slice(0, 1).toUpperCase()}</span>
+        <span className="link-card-copy"><span className="link-card-title">{link.title}</span><span className="link-card-domain">{domain}</span><span className="link-card-desc">{link.description}</span></span>
+        <Ic n="chevR" />
+      </a>;
+    })}</div>
+  </section>)}</section>;
 }
 
 interface StatsScreenProps {
@@ -820,7 +820,7 @@ interface StatsScreenProps {
 
 function StatsLoadingSkeleton() {
   return (
-    <section className="screen stats-screen">
+    <SkeletonRegion className="screen stats-screen" label="Ładowanie statystyk">
       <div className="stats-hero stats-hero-loading">
         <Skeleton className="skeleton-line skeleton-line-sm" style={{ width: '140px' }} />
         <Skeleton className="skeleton-line skeleton-line-md" style={{ width: '260px' }} />
@@ -844,7 +844,7 @@ function StatsLoadingSkeleton() {
           <Skeleton className="stats-side-skeleton" />
         </div>
       </div>
-    </section>
+    </SkeletonRegion>
   );
 }
 
@@ -1010,141 +1010,54 @@ interface SettingsScreenProps {
 }
 
 export function SettingsScreen({ settings, setSettings, t }: SettingsScreenProps) {
-  const themeOptions = [
-    { value: 'system' as const, label: t('settings.themeSystem') },
-    { value: 'light' as const, label: t('settings.themeLight') },
-    { value: 'dark' as const, label: t('settings.themeDark') },
-  ];
-  const themeLabel = themeOptions.find((option) => option.value === settings.theme)?.label ?? t('settings.themeSystem');
-  const summaryItems = [
-    {
-      icon: 'user',
-      label: t('settings.language'),
-      value: settings.language === 'pl' ? 'Polski' : 'English',
-    },
-    {
-      icon: 'eye',
-      label: t('settings.theme'),
-      value: themeLabel,
-    },
-    {
-      icon: 'clock',
-      label: t('settings.refresh'),
-      value: `${settings.refreshMinutes} min`,
-    },
-    {
-      icon: 'calendar',
-      label: t('settings.compactPlan'),
-      value: settings.compactPlan ? t('settings.stateOn') : t('settings.stateOff'),
-    },
-    {
-      icon: 'grade',
-      label: t('settings.gradeGroup'),
-      value: settings.gradesGrouping ? t('settings.stateOn') : t('settings.stateOff'),
-    },
-  ] as const;
-
-  return (
-    <section className="screen settings-screen">
-      <aside className="settings-side-card">
-        <div className="settings-side-icon"><Ic n="settings" /></div>
-        <div className="settings-side-eyebrow">{t('settings.desktopEyebrow')}</div>
-        <div className="settings-side-title">{t('settings.desktopTitle')}</div>
-        <div className="settings-side-copy">{t('settings.desktopCopy')}</div>
-
-        <div className="settings-side-grid">
-          {summaryItems.map((item) => (
-            <div key={item.label} className="settings-side-item">
-              <div className="settings-side-item-icon"><Ic n={item.icon} /></div>
-              <div className="settings-side-item-copy">
-                <div className="settings-side-item-label">{item.label}</div>
-                <div className="settings-side-item-value">{item.value}</div>
-              </div>
-            </div>
-          ))}
+  const [message, setMessage] = useState('');
+  const input = useRef<HTMLInputElement>(null);
+  const account = loadSession()?.userId || '';
+  const exportSettings = () => {
+    try {
+      const backup = parseSettingsBackup(JSON.stringify({ version: 1, settings, tiles: loadHomeTiles(account), filters: JSON.parse(localStorage.getItem(`zutnik_filters:${account}`) || '[]') }));
+      const url = URL.createObjectURL(new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' }));
+      const link = document.createElement('a'); link.href = url; link.download = 'zutnik-ustawienia.json'; link.click();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch { setMessage(t('settings.exportFailed')); }
+  };
+  return <section className="screen settings-screen"><div className="settings-main">
+    <section className="settings-section">
+      <h2 className="settings-card-title">{t('settings.backupTitle')}</h2>
+      <div className="settings-backup-actions"><button className="secondary-btn" onClick={exportSettings}><Ic n="download" />{t('settings.export')}</button><button className="secondary-btn" onClick={() => input.current?.click()}><Ic n="upload" />{t('settings.import')}</button></div>
+      <input ref={input} type="file" accept=".json,application/json" hidden onChange={async (event) => {
+        const file = event.target.files?.[0]; event.target.value = ''; if (!file) return;
+        try {
+          if (file.size > 100_000) throw new Error('Plik jest zbyt duży.');
+          const backup = parseSettingsBackup(await file.text());
+          if (backup.tiles) localStorage.setItem(`zutnik_home:${account}`, JSON.stringify(backup.tiles));
+          if (backup.filters) localStorage.setItem(`zutnik_filters:${account}`, JSON.stringify(backup.filters));
+          window.dispatchEvent(new Event('zutnik-settings-imported'));
+          setSettings(backup.settings); setMessage('Ustawienia zaimportowane.');
+        } catch (error) { setMessage(error instanceof Error ? error.message : 'Nie udało się zaimportować ustawień.'); }
+      }} />
+      {message && <p className="settings-import-status" role="status">{message}</p>}
+    </section>
+    <section className="settings-section">
+      <h2 className="settings-card-title">{t('settings.sectionInterface')}</h2>
+      <div className="settings-section-body">
+        <div className="settings-select-row"><label htmlFor="app-theme">{t('settings.theme')}</label><p>{t('settings.themeDescription')}</p>
+          <Select id="app-theme" value={settings.theme} onChange={(event) => setSettings((current) => ({ ...current, theme: event.target.value as AppSettings['theme'] }))}>
+            {(['system', 'light', 'dark'] as const).map((theme) => <option key={theme} value={theme}>{t(`settings.theme${theme[0].toUpperCase()}${theme.slice(1)}`)}</option>)}
+          </Select>
         </div>
-      </aside>
-
-      <div className="settings-main">
-        <div className="settings-card settings-section-card">
-          <div className="settings-card-head">
-            <div className="settings-card-kicker">{t('settings.sectionInterface')}</div>
-            <div className="settings-card-title">{t('settings.sectionInterface')}</div>
-          </div>
-
-          <div className="settings-row">
-            <div className="settings-row-info">
-              <div className="settings-row-label">{t('settings.language')}</div>
-              <div className="settings-row-sub">{t('settings.languageSub')}</div>
-            </div>
-            <select value={settings.language} onChange={(e) => setSettings((p) => ({ ...p, language: e.target.value as 'pl' | 'en' }))}>
-              <option value="pl">Polski</option>
-              <option value="en">English</option>
-            </select>
-          </div>
-
-          <div className="settings-row settings-row-theme">
-            <div className="settings-row-info">
-              <div className="settings-row-label">{t('settings.theme')}</div>
-              <div className="settings-row-sub">{t('settings.themeSub')}</div>
-            </div>
-            <div className="settings-theme-segmented" role="radiogroup" aria-label={t('settings.theme')}>
-              {themeOptions.map((option) => {
-                const active = settings.theme === option.value;
-                return (
-                  <button
-                    key={option.value}
-                    type="button"
-                    className={`settings-theme-segment${active ? ' is-active' : ''}`}
-                    role="radio"
-                    aria-checked={active}
-                    onClick={() => setSettings((p) => ({ ...p, theme: option.value }))}
-                  >
-                    {option.label}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          <div className="settings-row">
-            <div className="settings-row-info">
-              <div className="settings-row-label">{t('settings.refresh')}</div>
-              <div className="settings-row-sub">{t('settings.refreshSub')}</div>
-            </div>
-            <select value={settings.refreshMinutes} onChange={(e) => setSettings((p) => ({ ...p, refreshMinutes: Number(e.target.value) as 30 | 60 | 120 }))}>
-              <option value={30}>30 min</option>
-              <option value={60}>60 min</option>
-              <option value={120}>120 min</option>
-            </select>
-          </div>
-        </div>
-
-        <div className="settings-card settings-section-card">
-          <div className="settings-card-head">
-            <div className="settings-card-kicker">{t('settings.sectionViews')}</div>
-            <div className="settings-card-title">{t('settings.sectionViews')}</div>
-          </div>
-
-          <div className="settings-row">
-            <div className="settings-row-info">
-              <div className="settings-row-label">{t('settings.compactPlan')}</div>
-              <div className="settings-row-sub">{t('settings.compactPlanSub')}</div>
-            </div>
-            <Toggle checked={settings.compactPlan} onChange={(v) => setSettings((p) => ({ ...p, compactPlan: v }))} />
-          </div>
-
-          <div className="settings-row">
-            <div className="settings-row-info">
-              <div className="settings-row-label">{t('settings.gradeGroup')}</div>
-              <div className="settings-row-sub">{t('settings.gradeGroupSub')}</div>
-            </div>
-            <Toggle checked={settings.gradesGrouping} onChange={(v) => setSettings((p) => ({ ...p, gradesGrouping: v }))} />
-          </div>
-        </div>
+        <div className="settings-select-row"><label htmlFor="app-language">{t('settings.language')}</label><p>{t('settings.languageDescription')}</p><Select id="app-language" value={settings.language} onChange={(event) => setSettings((current) => ({ ...current, language: event.target.value as 'pl' | 'en' }))}><option value="pl">Polski</option><option value="en">English</option></Select></div>
       </div>
     </section>
-  );
+    <section className="settings-section"><h2 className="settings-card-title">{t('settings.sectionViews')}</h2><div className="settings-section-body">
+      <div className="settings-row"><span>{t('settings.compactPlan')}</span><Toggle label={t('settings.compactPlan')} checked={settings.compactPlan} onChange={(value) => setSettings((current) => ({ ...current, compactPlan: value }))} /></div>
+      <div className="settings-row"><span>{t('settings.gradeGroup')}</span><Toggle label={t('settings.gradeGroup')} checked={settings.gradesGrouping} onChange={(value) => setSettings((current) => ({ ...current, gradesGrouping: value }))} /></div>
+    </div></section>
+    <section className="settings-section"><h2 className="settings-card-title">{t('settings.dataTitle')}</h2><div className="settings-section-body">
+      <div className="settings-row"><span>{t('settings.backgroundRefresh')}</span><small>{t('settings.backgroundOff')}</small></div>
+      <div className="settings-row"><span>{t('settings.manualRefresh')}</span><small>{t('settings.cooldown')}</small></div>
+    </div></section>
+  </div></section>;
 }
 
 interface AboutScreenProps {
@@ -1154,78 +1067,43 @@ interface AboutScreenProps {
   t: TranslateFn;
 }
 
+const PLAY_STORE_URL = 'https://play.google.com/store/apps/details?id=pl.kejlo.zutnik';
+const PROJECT_URL = 'https://zutnik.endozero.pl';
+
 export function AboutScreen({ canOfferInstall, handleInstallPwa, isIosSafari, t }: AboutScreenProps) {
-  return (
-    <section className="screen about-screen">
-      <div className="about-overview">
-        <div className="about-hero card">
-          <div className="about-hero-head">
-            <img src={LOGO_SRC} alt="Logo ZUTnik" className="about-logo-img" />
-            <div className="about-hero-copy">
-              <div className="about-app-name">ZUTnik</div>
-              <div className="about-version">2.0 (PWA)</div>
-              <div className="about-note">{t('about.pwaNote')}</div>
-            </div>
-          </div>
-
-          {canOfferInstall && (
-            <button type="button" className="about-action-card about-install-card" onClick={() => void handleInstallPwa()}>
-              <div className="about-action-icon">📲</div>
-              <div className="about-action-content">
-                <div className="about-action-title">{t('about.installApp')}</div>
-                <div className="about-action-desc">
-                  {isIosSafari ? t('about.installIos') : t('about.installAndroid')}
-                </div>
-              </div>
-              <div className="about-action-arrow">→</div>
-            </button>
-          )}
-        </div>
-
-        <div className="about-description card">
-          <p>{t('about.description')}</p>
-          <p className="about-signoff">Made with ❤️ by Kejlo</p>
-        </div>
+  const [shareStatus, setShareStatus] = useState('');
+  const shareApp = async () => {
+    try {
+      if (navigator.share) { await navigator.share({ title: 'ZUTnik', url: PROJECT_URL }); return; }
+      if (navigator.clipboard?.writeText) { await navigator.clipboard.writeText(PROJECT_URL); setShareStatus(t('about.linkCopied')); }
+      else setShareStatus(t('about.shareFallback'));
+    } catch (error) {
+      if (!(error instanceof DOMException && error.name === 'AbortError')) setShareStatus(t('about.shareFallback'));
+    }
+  };
+  const links = [
+    { href: PROJECT_URL, icon: 'info', title: t('about.projectSite') },
+    { href: 'https://endozero.pl', icon: 'user', title: t('about.authorSite') },
+    { href: PROJECT_URL + '/privacy_policy.html', icon: 'lock', title: t('about.privacyPolicy') },
+    { href: 'mailto:kejlo@endozero.pl', icon: 'mail', title: 'kejlo@endozero.pl' },
+  ];
+  return <section className="screen about-screen">
+    <div className="about-overview">
+      <div className="about-hero"><img src={LOGO_SRC} alt="Logo ZUTnik" className="about-logo-img" /><div className="about-app-name">ZUTnik</div><div className="about-version">PWA</div>
+        <div className="about-hero-actions"><a href={PLAY_STORE_URL} target="_blank" rel="noreferrer" className="secondary-btn"><Ic n="store" />{t('about.playStore')}</a><button className="secondary-btn" onClick={() => void shareApp()}><Ic n="share" />{t('about.share')}</button></div>
+        {shareStatus && <p className="about-share-status" role="status">{shareStatus}</p>}
       </div>
-
-      <div className="about-panels">
-        <div className="about-actions">
-          <a href="https://github.com/Kejlo523" target="_blank" rel="noreferrer" className="about-action-card">
-            <div className="about-action-icon">📝</div>
-            <div className="about-action-content">
-              <div className="about-action-title">{t('about.sourceCode')}</div>
-              <div className="about-action-desc">{t('about.sourceDesc')}</div>
-            </div>
-            <div className="about-action-arrow">→</div>
-          </a>
-        </div>
-
-        <div className="about-links">
-          <a href="https://zutnik.endozero.pl" target="_blank" rel="noreferrer" className="about-link-item">
-            <span className="about-link-icon">ℹ️</span>
-            <span className="about-link-text">{t('about.projectSite')}</span>
-            <span className="about-link-arrow">→</span>
-          </a>
-
-          <a href="https://endozero.pl" target="_blank" rel="noreferrer" className="about-link-item">
-            <span className="about-link-icon">👤</span>
-            <span className="about-link-text">{t('about.authorSite')}</span>
-            <span className="about-link-arrow">→</span>
-          </a>
-
-          <a href="https://endozero.pl" target="_blank" rel="noreferrer" className="about-link-item">
-            <span className="about-link-icon">🔒</span>
-            <span className="about-link-text">{t('about.privacyPolicy')}</span>
-            <span className="about-link-arrow">→</span>
-          </a>
-
-          <a href="mailto:kejlo@endozero.pl" className="about-link-item">
-            <span className="about-link-icon">📧</span>
-            <span className="about-link-text">E-mail: kejlo@endozero.pl</span>
-            <span className="about-link-arrow">→</span>
-          </a>
-        </div>
+      <h2 className="about-section-label">{t('about.supportSection')}</h2>
+      <div className="about-actions">
+        <a href={PLAY_STORE_URL} target="_blank" rel="noreferrer" className="about-action-card"><span className="about-action-icon is-rating"><Ic n="star" /></span><span className="about-action-content"><span className="about-action-title">{t('about.rateApp')}</span><span className="about-action-desc">{t('about.rateDesc')}</span></span><Ic n="chevR" /></a>
+        <a href="https://github.com/Kejlo523/ZUTnik" target="_blank" rel="noreferrer" className="about-action-card"><span className="about-action-icon"><Ic n="github" /></span><span className="about-action-content"><span className="about-action-title">{t('about.sourceCode')}</span><span className="about-action-desc">{t('about.sourceDesc')}</span></span><Ic n="external" /></a>
+        {canOfferInstall && <button className="about-action-card" onClick={() => void handleInstallPwa()}><span className="about-action-icon"><Ic n="download" /></span><span className="about-action-content"><span className="about-action-title">{t('about.installApp')}</span><span className="about-action-desc">{isIosSafari ? t('about.installIos') : t('about.installAndroid')}</span></span><Ic n="chevR" /></button>}
       </div>
-    </section>
-  );
+    </div>
+    <div className="about-panels">
+      <h2 className="about-section-label">{t('about.contactSection')}</h2>
+      <div className="about-links">{links.map((link) => <a key={link.href} href={link.href} target={link.href.startsWith('https:') ? '_blank' : undefined} rel="noreferrer" className="about-link-item"><span className="about-link-icon"><Ic n={link.icon} /></span><span className="about-link-text">{link.title}</span><Ic n="chevR" /></a>)}</div>
+      <div className="about-description"><p>{t('about.description')}</p><p className="about-signoff">Made by Kejlo</p></div>
+    </div>
+  </section>;
 }

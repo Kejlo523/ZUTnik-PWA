@@ -1,8 +1,12 @@
-import React, { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import './App.css';
-import './zutnik-android.css';
-import './motion.css';
-import { MOTION_EASE, MOTION_MS } from './motion';
+import { PlanScreen } from './app/screens/PlanScreen';
+import { useTimetable } from './hooks/useTimetable';
+import { useScreenMotion } from './hooks/useScreenMotion';
+import { beginRefresh, finishRefresh, type ResourceModule } from './services/refreshPolicy';
+import { removeResources, readResource, saveResource } from './services/offlineStore';
+import { clearTimetableAccount } from './services/timetable';
+import { filterTimetable } from './services/timetablePages';
 import type {
   CalendarEvent,
   CreditSummary,
@@ -13,7 +17,6 @@ import type {
   PlanResult,
   ScreenKey,
   SessionData,
-  SessionPeriod,
   StatsSnapshot,
   Study,
   StudyDetails,
@@ -21,7 +24,6 @@ import type {
   ViewMode,
 } from './types';
 import {
-  buildPlanResultFromWindow,
   fetchCombinedGrades,
   fetchCombinedStudies,
   fetchCreditSummary,
@@ -29,18 +31,14 @@ import {
   fetchFinance,
   fetchInfo,
   fetchNews,
-  fetchPlanHiddenSubjects,
   fetchPlanSemesterExport,
   fetchPlanSuggestions,
-  fetchPlanWindow,
   fetchStatsSnapshot,
   fetchStudentPhotoBlob,
   fetchUsosRequestToken,
   getFriendlyErrorMessage,
   isSessionExpiredError,
   loginWithUsos,
-  savePlanHiddenSubjects as savePlanHiddenSubjectsByAlbum,
-  type PlanWindowData,
   validateSession,
 } from './services/api';
 import {
@@ -51,6 +49,7 @@ import {
   loadSettings,
   saveSession,
   saveSettings,
+  clearAccountCache,
   type AppSettings,
 } from './services/storage';
 import { sortUsefulLinks } from './constants/usefulLinks';
@@ -66,33 +65,27 @@ import {
   normalizePlanFilterString,
 } from './planFilters';
 import { exportPlanToIcs } from './app/planExport';
-import { relayoutDayEvents } from './app/planLayout';
-import { LOGO_SRC, MONTH_WEEKDAY_KEYS, SCREEN_I18N_KEY } from './app/constants';
+import { SCREEN_I18N_KEY } from './app/constants';
 import {
-  addDaysYmd,
   collapseCorrectedGrades,
   extractGradeBaseSubject,
-  fmtDateLabel,
-  fmtDayMonth,
   fmtDec,
-  fmtHour,
   gradeMatchesHiddenPlanFilter,
-  fmtWeekdayShort,
   getSessionSignature,
   isFinalGradeType,
-  isWeekendDate,
   parseGradeNum,
-  planTypeShort,
   planSubjectFilterSubject,
-  planCacheKey,
   sumUniqueEcts,
   todayYmd,
 } from './app/helpers';
-import { Ic, Skeleton } from './app/ui';
+import { Ic, LoadingIndicator } from './app/ui';
+import { ScreenChunkFallback } from './app/screens/ScreenLoaders';
 import type { DrawerScreenKey, NewsDetailParams, SelectedPlanEvent } from './app/viewTypes';
 import { HomeScreen, LoginScreen } from './app/screens/AuthScreens';
 import { PlanEventSheet, PlanFiltersSheet, PlanSearchSheet } from './app/screens/PlanOverlays';
 import { AppNavigation } from './app/AppNavigation';
+import { PwaUpdateNotice } from './app/components/PwaUpdateNotice';
+import { Sheet } from './app/components/Sheet';
 
 const GradesScreen = lazy(() => import('./app/screens/StudyScreens').then((module) => ({ default: module.GradesScreen })));
 const FinanceScreen = lazy(() => import('./app/screens/StudyScreens').then((module) => ({ default: module.FinanceScreen })));
@@ -106,13 +99,7 @@ const StatsScreen = lazy(() => import('./app/screens/ContentScreens').then((modu
 
 const SESSION_VALIDATE_INTERVAL_MS = 30 * 24 * 60 * 60_000;
 const EMPTY_FINANCE_SNAPSHOT: FinanceSnapshot = { records: [], fetchedAt: 0 };
-const PLAN_PREFETCH_DAYS_BACK = 7;
-const PLAN_PREFETCH_DAYS_FORWARD = 21;
 const STATS_OWNER_ALBUM = '57796';
-const PHONE_VIEWPORT_MAX_SIDE = 700;
-const PHONE_VIEWPORT_SCALE_FIX_RATIO = 1.35;
-const PHONE_VIEWPORT_MAX_SCALE_FIX = 3;
-
 function formatDataUpdatedAt(timestamp: number, language: AppSettings['language']): string {
   if (!timestamp) return language === 'en' ? 'Saved locally' : 'Dane zapisane lokalnie';
   const locale = language === 'en' ? 'en-GB' : 'pl-PL';
@@ -120,25 +107,6 @@ function formatDataUpdatedAt(timestamp: number, language: AppSettings['language'
   return language === 'en' ? `Updated ${date}` : `Odświeżono ${date}`;
 }
 
-function ScreenChunkFallback() {
-  return (
-    <section className="screen screen-chunk-fallback" aria-busy="true">
-      <Skeleton className="skeleton-line skeleton-line-md" style={{ width: '180px' }} />
-      <div className="screen-chunk-fallback-grid">
-        <Skeleton className="skeleton-block" />
-        <Skeleton className="skeleton-block" />
-        <Skeleton className="skeleton-block" />
-      </div>
-    </section>
-  );
-}
-
-interface PhoneViewportState {
-  isPhone: boolean;
-  needsScaleFix: boolean;
-  scale: number;
-  width: number;
-}
 
 interface NavigatorWithStandalone extends Navigator {
   standalone?: boolean;
@@ -166,21 +134,6 @@ function arePlanHiddenSubjectListsEqual(left: string[], right: string[]): boolea
   return left.length === right.length && left.every((value, index) => value === right[index]);
 }
 
-function parsePlanDate(value: string): Date {
-  const parsed = new Date(`${value}T00:00:00`);
-  return Number.isFinite(parsed.getTime()) ? parsed : new Date();
-}
-
-function addPlanDays(date: Date, days: number): Date {
-  const next = new Date(date);
-  next.setDate(next.getDate() + days);
-  return next;
-}
-
-function formatPlanDate(date: Date): string {
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
-}
-
 function normalizeStatsAlbum(value: unknown): string {
   const match = String(value || '').trim().match(/^s?(\d{4,6})$/i);
   return match?.[1] ?? '';
@@ -199,125 +152,13 @@ function keepRealGrades(items: Grade[]): Grade[] {
   return items.filter((item) => item.grade?.trim() || !isFinalGradeType(item.type, item.subjectName));
 }
 
-function getPositiveViewportNumbers(values: Array<number | undefined>): number[] {
-  return values.filter((value): value is number => typeof value === 'number' && Number.isFinite(value) && value > 0);
-}
-
-function getSmallestViewportSide(): number {
-  const deviceValues = getPositiveViewportNumbers([
-    window.screen?.width,
-    window.screen?.height,
-    window.screen?.availWidth,
-    window.screen?.availHeight,
-  ]);
-  if (deviceValues.length) {
-    return Math.min(...deviceValues);
-  }
-
-  const viewportValues = getPositiveViewportNumbers([
-    window.visualViewport?.width,
-    window.visualViewport?.height,
-    window.innerWidth,
-    window.innerHeight,
-    document.documentElement.clientWidth,
-    document.documentElement.clientHeight,
-  ]);
-
-  return viewportValues.length ? Math.min(...viewportValues) : window.innerWidth;
-}
-
-function getPhoneViewportState(): PhoneViewportState {
-  const hasTouch = navigator.maxTouchPoints > 0 || window.matchMedia('(pointer: coarse)').matches;
-  const isPhone = hasTouch && getSmallestViewportSide() <= PHONE_VIEWPORT_MAX_SIDE;
-  const screenWidths = getPositiveViewportNumbers([
-    window.screen?.width,
-    window.screen?.availWidth,
-  ]);
-  const layoutWidths = getPositiveViewportNumbers([
-    document.documentElement.clientWidth,
-    window.innerWidth,
-    window.visualViewport?.width,
-  ]);
-  const viewportScale = window.visualViewport?.scale;
-  const hasViewportScale = typeof viewportScale === 'number' && Number.isFinite(viewportScale) && viewportScale > 0;
-  const screenWidth = Math.max(1, Math.round(screenWidths.length ? Math.min(...screenWidths) : window.innerWidth));
-  const layoutWidth = layoutWidths.length ? Math.max(...layoutWidths) : screenWidth;
-  const rawScale = screenWidth > 0 ? layoutWidth / screenWidth : 1;
-  const isZoomedOutLayout = hasViewportScale
-    ? viewportScale < 0.95
-    : layoutWidth >= 900 && layoutWidth >= screenWidth * PHONE_VIEWPORT_SCALE_FIX_RATIO;
-  const needsScaleFix = isPhone && rawScale >= PHONE_VIEWPORT_SCALE_FIX_RATIO && isZoomedOutLayout;
-  const scaleSource = hasViewportScale ? 1 / viewportScale : rawScale;
-  const scale = needsScaleFix ? Math.min(PHONE_VIEWPORT_MAX_SCALE_FIX, Math.round(scaleSource * 100) / 100) : 1;
-  const width = Math.max(1, Math.round(needsScaleFix ? layoutWidth / scale : screenWidth));
-
-  return { isPhone, needsScaleFix, scale, width };
-}
-
-function arePhoneViewportStatesEqual(left: PhoneViewportState, right: PhoneViewportState): boolean {
-  return left.isPhone === right.isPhone
-    && left.needsScaleFix === right.needsScaleFix
-    && left.scale === right.scale
-    && left.width === right.width;
-}
-
-function applyPhoneViewportCss(state: PhoneViewportState): void {
-  const root = document.documentElement;
-  root.classList.toggle('phone-scale-fix', state.needsScaleFix);
-  if (state.needsScaleFix) {
-    root.style.setProperty('--phone-viewport-scale', String(state.scale));
-    root.style.setProperty('--phone-viewport-width', `${state.width}px`);
-    return;
-  }
-
-  root.style.removeProperty('--phone-viewport-scale');
-  root.style.removeProperty('--phone-viewport-width');
-}
-
 function applyThemePreference(theme: AppSettings['theme']): void {
   const root = document.documentElement;
   if (theme === 'system') {
-    root.removeAttribute('data-theme');
+    root.dataset.theme = window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
     return;
   }
   root.dataset.theme = theme;
-}
-
-function resolvePlanVisibleRange(viewMode: ViewMode, currentDateText: string): { rangeStart: string; rangeEnd: string } {
-  const current = parsePlanDate(currentDateText);
-
-  if (viewMode === 'day') {
-    const ymd = formatPlanDate(current);
-    return { rangeStart: ymd, rangeEnd: ymd };
-  }
-
-  if (viewMode === 'month') {
-    return {
-      rangeStart: formatPlanDate(new Date(current.getFullYear(), current.getMonth(), 1)),
-      rangeEnd: formatPlanDate(new Date(current.getFullYear(), current.getMonth() + 1, 0)),
-    };
-  }
-
-  const dayOfWeek = current.getDay() || 7;
-  const rangeStart = addPlanDays(current, -(dayOfWeek - 1));
-  return {
-    rangeStart: formatPlanDate(rangeStart),
-    rangeEnd: formatPlanDate(addPlanDays(rangeStart, 6)),
-  };
-}
-
-function doesPlanWindowCoverView(planWindow: PlanWindowData, viewMode: ViewMode, currentDateText: string): boolean {
-  const { rangeStart, rangeEnd } = resolvePlanVisibleRange(viewMode, currentDateText);
-  return planWindow.rangeStart <= rangeStart && planWindow.rangeEnd >= rangeEnd;
-}
-
-function buildPlanWindowCacheKey(studyId: string | null, search: { category: string; query: string }): string {
-  const query = search.query.trim();
-  if (query) {
-    const category = (search.category || 'album').trim().toLowerCase() || 'album';
-    return `search:${category}:${query.toLowerCase()}`;
-  }
-  return `study:${studyId ?? 'nostudy'}`;
 }
 
 function App() {
@@ -332,7 +173,6 @@ function App() {
   const [globalLoading, setGlobalLoad] = useState(false);
   const [globalError, setGlobalError] = useState('');
   const [toast, setToast] = useState('');
-  const [phoneViewport, setPhoneViewport] = useState<PhoneViewportState>(() => getPhoneViewportState());
   const sessionKey = getSessionSignature(session);
   const sessionExpiryHandledRef = useRef(false);
   const sessionCheckInFlightRef = useRef<Promise<boolean> | null>(null);
@@ -341,17 +181,20 @@ function App() {
   const overlayBackAttemptRef = useRef<(() => BackInterceptResult) | null>(null);
   const newsGalleryBackRef = useRef<(() => BackInterceptResult) | null>(null);
   const rootBackAttemptRef = useRef<(() => boolean) | null>(null);
-  const phoneViewportRafRef = useRef<number | null>(null);
-  const phoneViewportTimerRefs = useRef<number[]>([]);
 
   const nav = useAppNavigation<ScreenKey>(session ? 'home' : 'login', {
     onBackAttemptRef: overlayBackAttemptRef,
     onRootBackAttemptRef: rootBackAttemptRef,
   });
   const screen = nav.current.key;
+  const mainRef = useRef<HTMLElement>(null);
+  useScreenMotion(mainRef, screen);
   const statsDeepLinkHandledRef = useRef(false);
 
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [homeEditing, setHomeEditing] = useState(false);
+  const [planSearchSeed, setPlanSearchSeed] = useState<{ category: string; query: string } | undefined>();
+  const suggestionSequence = useRef(0);
 
   // PWA install prompt
   const deferredPromptRef = useRef<BeforeInstallPromptEvent | null>(null);
@@ -367,9 +210,6 @@ function App() {
   // On iOS Safari user installs manually via Share sheet — we can offer instructions
   const canOfferInstall = !isStandalone && (canInstallPwa || isIosSafari);
 
-  const INSTALL_TIP_KEY = 'zutnik_install_tip_v1';
-  const [showInstallTip, setShowInstallTip] = useState(false);
-  const [installTipFading, setInstallTipFading] = useState(false);
   const [showIosInstructions, setShowIosInstructions] = useState(false);
 
   useEffect(() => {
@@ -379,8 +219,9 @@ function App() {
       setCanInstallPwa(true);
     };
     window.addEventListener('beforeinstallprompt', handler);
-    window.addEventListener('appinstalled', () => { setCanInstallPwa(false); deferredPromptRef.current = null; });
-    return () => window.removeEventListener('beforeinstallprompt', handler);
+    const installed = () => { setCanInstallPwa(false); deferredPromptRef.current = null; };
+    window.addEventListener('appinstalled', installed);
+    return () => { window.removeEventListener('beforeinstallprompt', handler); window.removeEventListener('appinstalled', installed); };
   }, []);
 
   const handleInstallPwa = async () => {
@@ -418,16 +259,6 @@ function App() {
   const planSearchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const planMoreMenuRef = useRef<HTMLDivElement | null>(null);
 
-  // Plan carousel swipe (direct DOM animation — no React state per frame)
-  const carouselRef = useRef<HTMLDivElement | null>(null);
-  const planDragRef = useRef<{ startX: number; startY: number; startTime: number; locked: boolean } | null>(null);
-
-  // Now line — current time indicator
-  const [nowMinute, setNowMinute] = useState(() => {
-    const n = new Date();
-    return n.getHours() * 60 + n.getMinutes();
-  });
-
   // Grades
   const [grades, setGrades] = useState<Grade[]>([]);
   const [gradesLoading, setGradesLoad] = useState(false);
@@ -436,9 +267,6 @@ function App() {
   const [expandedGradeSubjects, setExpandedGradeSubjects] = useState<Record<string, boolean>>({});
   const gradesRef = useRef<Grade[]>([]);
   const creditsRef = useRef<CreditSummary | null>(null);
-  const planRequestIdRef = useRef<string>('');
-  const planWindowCacheRef = useRef<Record<string, PlanWindowData>>({});
-  const planWindowRequestsRef = useRef<Record<string, Promise<PlanWindowData>>>({});
   const gradesPlanFilterRequestIdRef = useRef<string>('');
   const gradesPlanFilterCacheRef = useRef<Record<string, { album: string; filters: PlanResult['subjectFilters'] }>>({});
 
@@ -503,46 +331,6 @@ function App() {
     return () => window.clearTimeout(t);
   }, [toast]);
 
-  // ── Now line timer (update every minute) ───────────────────────────────
-  useEffect(() => {
-    const tick = () => {
-      const n = new Date();
-      setNowMinute(n.getHours() * 60 + n.getMinutes());
-    };
-    const id = setInterval(tick, 60_000);
-    return () => clearInterval(id);
-  }, []);
-
-  // ── Session inactivity timeout (30 days, without overflowing setTimeout) ─
-  useEffect(() => {
-    if (!session) return;
-    const SESSION_TIMEOUT = 30 * 24 * 60 * 60 * 1000; // 30 days
-    const CHECK_INTERVAL = 60_000; // 1 minute
-    let lastActivityTs = Date.now();
-
-    const touchActivity = () => {
-      lastActivityTs = Date.now();
-    };
-
-    const checkInactivity = () => {
-      if (Date.now() - lastActivityTs >= SESSION_TIMEOUT) {
-        setSession(null);
-        setToast('Sesja wygasła, zaloguj się ponownie');
-      }
-    };
-
-    const events = ['mousedown', 'keydown', 'scroll', 'touchstart', 'click'];
-    events.forEach(event => window.addEventListener(event, touchActivity));
-
-    const intervalId = window.setInterval(checkInactivity, CHECK_INTERVAL);
-    touchActivity();
-
-    return () => {
-      window.clearInterval(intervalId);
-      events.forEach(event => window.removeEventListener(event, touchActivity));
-    };
-  }, [session]);
-
   // ── Student photo loading via fetch (avoids CORS / cache issues) ────────
   const [studentPhotoBlobUrl, setStudentPhotoBlobUrl] = useState<string | null>(null);
   const studentPhotoBlobUrlRef = useRef<string | null>(null);
@@ -562,7 +350,15 @@ function App() {
     let cancelled = false;
     (async () => {
       try {
-        const blob = await fetchStudentPhotoBlob(session);
+        const key = `photo:${session.userId}`;
+        const saved = await readResource<Blob>(key);
+        let blob = saved?.data ?? null;
+        if (navigator.onLine && (!saved || Date.now() - saved.ts > 7 * 86_400_000)) {
+          try {
+            const fresh = await fetchStudentPhotoBlob(session);
+            if (fresh?.size) { blob = fresh; await saveResource(key, fresh); }
+          } catch { /* Keep the saved photograph when the server is unavailable. */ }
+        }
         if (cancelled) return;
         if (!blob || blob.size === 0) { setStudentPhotoError(true); return; }
         const blobUrl = URL.createObjectURL(blob);
@@ -611,41 +407,31 @@ function App() {
   }, []);
 
   const loadPersistedPlanHiddenSubjects = useCallback(async (album: string): Promise<string[]> => {
-    const normalizedAlbum = album.trim();
-    if (!normalizedAlbum) return [];
-
     try {
-      const legacyKeys = loadLegacyPlanHiddenSubjects();
-      let keys = await fetchPlanHiddenSubjects(normalizedAlbum);
-      if (!keys.length && legacyKeys.length) {
-        keys = await savePlanHiddenSubjectsByAlbum(normalizedAlbum, legacyKeys);
-      }
-      if (legacyKeys.length) {
-        clearLegacyPlanHiddenSubjects();
-      }
-      return normalizePlanHiddenSubjectKeys(keys);
-    } catch (error) {
-      console.warn(`Failed to load plan hidden subjects for album ${normalizedAlbum}`, error);
-      const existingKeys = planHiddenSubjectKeysByAlbumRef.current[normalizedAlbum];
-      if (existingKeys?.length) {
-        return existingKeys;
-      }
-      return normalizePlanHiddenSubjectKeys(loadLegacyPlanHiddenSubjects());
-    }
+      const key = `zutnik_filters:${album.trim()}`;
+      const saved = localStorage.getItem(key);
+      const values = saved ? JSON.parse(saved) : loadLegacyPlanHiddenSubjects();
+      const keys = normalizePlanHiddenSubjectKeys(Array.isArray(values) ? values : []);
+      localStorage.setItem(key, JSON.stringify(keys));
+      clearLegacyPlanHiddenSubjects();
+      return keys;
+    } catch { return planHiddenSubjectKeysByAlbumRef.current[album] ?? []; }
   }, []);
 
   const persistPlanHiddenSubjects = useCallback(async (album: string, keys: string[]) => {
-    const normalizedAlbum = album.trim();
-    if (!normalizedAlbum) return;
-
-    try {
-      const savedKeys = await savePlanHiddenSubjectsByAlbum(normalizedAlbum, keys);
-      setPlanHiddenSubjectsForAlbum(normalizedAlbum, savedKeys);
-    } catch (error) {
-      console.warn(`Failed to save plan hidden subjects for album ${normalizedAlbum}`, error);
-      showToast('Nie udało się zapisać wykluczeń przedmiotów');
-    }
+    setPlanHiddenSubjectsForAlbum(album, keys);
+    try { localStorage.setItem(`zutnik_filters:${album.trim()}`, JSON.stringify(keys)); }
+    catch { showToast('Brak miejsca na zapisanie filtrów.'); }
   }, [setPlanHiddenSubjectsForAlbum, showToast]);
+
+  useEffect(() => {
+    const reload = () => {
+      if (!session) return;
+      void loadPersistedPlanHiddenSubjects(session.userId).then((keys) => setPlanHiddenSubjectsForAlbum(session.userId, keys));
+    };
+    window.addEventListener('zutnik-settings-imported', reload);
+    return () => window.removeEventListener('zutnik-settings-imported', reload);
+  }, [session, loadPersistedPlanHiddenSubjects, setPlanHiddenSubjectsForAlbum]);
 
   // ── Keyboard drawer close ─────────────────────────────────────────────────
   useEffect(() => {
@@ -685,7 +471,7 @@ function App() {
     if (screen !== 'news-detail') return;
     const params = (nav.current.params ?? {}) as NewsDetailParams;
     if (!params?.item) {
-      nav.reset('home', undefined);
+      nav.reset('news', undefined);
     }
   }, [nav, screen]);
 
@@ -695,10 +481,6 @@ function App() {
       if (galleryResult === true) return true;
       if (galleryResult === 'consume') return 'consume';
 
-      if (screen === 'news-detail') {
-        nav.reset('home', undefined);
-        return 'consume';
-      }
       if (selectedPlanEvent) {
         setSelectedPlanEvent(null);
         return true;
@@ -717,12 +499,13 @@ function App() {
     return () => {
       overlayBackAttemptRef.current = null;
     };
-  }, [nav, planFiltersOpen, planSearchOpen, screen, selectedPlanEvent]);
+  }, [planFiltersOpen, planSearchOpen, selectedPlanEvent]);
 
   useEffect(() => {
     if (statsDeepLinkHandledRef.current || !session) return;
     const params = new URLSearchParams(window.location.search);
-    if (params.get('screen') !== 'stats') return;
+    const destination = params.get('screen');
+    if (!['stats', 'plan', 'grades'].includes(destination || '')) return;
 
     statsDeepLinkHandledRef.current = true;
     params.delete('screen');
@@ -733,17 +516,13 @@ function App() {
       `${window.location.pathname}${nextSearch ? `?${nextSearch}` : ''}${window.location.hash}`,
     );
 
-    if (canOpenStats) {
-      nav.reset('stats', undefined);
-    }
+    if (destination === 'plan' || destination === 'grades') nav.reset(destination, undefined);
+    else if (canOpenStats) nav.reset('stats', undefined);
   }, [canOpenStats, nav, session]);
 
   useEffect(() => {
     activeSessionKeyRef.current = sessionKey;
     sessionExpiryHandledRef.current = false;
-    planWindowCacheRef.current = {};
-    planWindowRequestsRef.current = {};
-    planRequestIdRef.current = '';
     setStatsSnapshot(null);
     setStatsError('');
 
@@ -762,6 +541,7 @@ function App() {
   // ── Close drawer on screen change ────────────────────────────────────────
   useEffect(() => {
     setDrawerOpen(false);
+    if (screen !== 'home') setHomeEditing(false);
     if (screen !== 'plan') {
       setPlanFiltersOpen(false);
       setPlanMoreMenuOpen(false);
@@ -772,6 +552,8 @@ function App() {
 
   useEffect(() => {
     if (!planMoreMenuOpen) return;
+    const items = () => Array.from(planMoreMenuRef.current?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]') ?? []);
+    items()[0]?.focus({ preventScroll: true });
 
     const handlePointerDown = (event: PointerEvent) => {
       const target = event.target;
@@ -784,6 +566,13 @@ function App() {
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         setPlanMoreMenuOpen(false);
+        planMoreMenuRef.current?.querySelector<HTMLButtonElement>('button')?.focus({ preventScroll: true });
+      } else if (['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) {
+        event.preventDefault();
+        const buttons = items();
+        const index = buttons.findIndex((button) => button === document.activeElement);
+        const next = event.key === 'Home' ? 0 : event.key === 'End' ? buttons.length - 1 : (index + (event.key === 'ArrowDown' ? 1 : -1) + buttons.length) % buttons.length;
+        buttons[next]?.focus({ preventScroll: true });
       }
     };
 
@@ -799,58 +588,12 @@ function App() {
   // ── i18n ───────────────────────────────────────────────────────────────────
   const t = useMemo(() => createT(settings.language), [settings.language]);
 
-  const refreshPhoneViewport = useCallback(() => {
-    const next = getPhoneViewportState();
-    applyPhoneViewportCss(next);
-    setPhoneViewport((current) => (arePhoneViewportStatesEqual(current, next) ? current : next));
-  }, []);
-
-  const schedulePhoneViewportRefresh = useCallback(() => {
-    if (phoneViewportRafRef.current !== null) {
-      window.cancelAnimationFrame(phoneViewportRafRef.current);
-    }
-    for (const timer of phoneViewportTimerRefs.current) {
-      window.clearTimeout(timer);
-    }
-
-    phoneViewportRafRef.current = window.requestAnimationFrame(() => {
-      phoneViewportRafRef.current = null;
-      refreshPhoneViewport();
-    });
-    phoneViewportTimerRefs.current = [80, 240, 600].map((delay) => window.setTimeout(refreshPhoneViewport, delay));
-  }, [refreshPhoneViewport]);
-
   useEffect(() => {
-    const visualViewport = window.visualViewport;
-    const refresh = () => schedulePhoneViewportRefresh();
-    schedulePhoneViewportRefresh();
-
-    window.addEventListener('resize', refresh);
-    window.addEventListener('orientationchange', refresh);
-    window.addEventListener('pageshow', refresh);
-    document.addEventListener('visibilitychange', refresh);
-    visualViewport?.addEventListener('resize', refresh);
-    visualViewport?.addEventListener('scroll', refresh);
-
-    return () => {
-      window.removeEventListener('resize', refresh);
-      window.removeEventListener('orientationchange', refresh);
-      window.removeEventListener('pageshow', refresh);
-      document.removeEventListener('visibilitychange', refresh);
-      visualViewport?.removeEventListener('resize', refresh);
-      visualViewport?.removeEventListener('scroll', refresh);
-      if (phoneViewportRafRef.current !== null) {
-        window.cancelAnimationFrame(phoneViewportRafRef.current);
-      }
-      for (const timer of phoneViewportTimerRefs.current) {
-        window.clearTimeout(timer);
-      }
-      phoneViewportTimerRefs.current = [];
-      document.documentElement.classList.remove('phone-scale-fix');
-      document.documentElement.style.removeProperty('--phone-viewport-scale');
-      document.documentElement.style.removeProperty('--phone-viewport-width');
-    };
-  }, [schedulePhoneViewportRefresh]);
+    const query = window.matchMedia('(prefers-color-scheme: light)');
+    const update = () => applyThemePreference(settings.theme);
+    update(); query.addEventListener('change', update);
+    return () => query.removeEventListener('change', update);
+  }, [settings.theme]);
 
   // ── Exit toast ────────────────────────────────────────────────────────────
   useExitAttemptToast(() => showToast(t('general.pressAgainToExit')));
@@ -873,35 +616,26 @@ function App() {
   const applySession = useCallback((s: SessionData | null) => {
     const nextSession = s ? { ...s, persistedAt: Date.now() } : null;
     setSession(nextSession);
+    if (nextSession && !saveSession(nextSession)) showToast('Przeglądarka nie pozwala zapisać sesji. Po zamknięciu trzeba będzie zalogować się ponownie.');
     if (!nextSession) {
       setPlanHiddenSubjectKeysByAlbum({});
       setPlanFiltersOpen(false);
       setPlanMoreMenuOpen(false);
       setPlanSearchOpen(false);
 
-      // Clear storage
-      localStorage.clear();
-      sessionStorage.clear();
-
-      // Clear Cache API (service worker caches)
-      if ('caches' in window) {
-        caches.keys().then(names => {
-          for (const name of names) {
-            caches.delete(name);
-          }
-        });
+      const previous = loadSession();
+      if (previous) {
+        clearAccountCache(previous.userId);
+        void clearTimetableAccount(previous.userId);
+        void removeResources(`suggest:${previous.userId}:`);
+        void removeResources(`photo:${previous.userId}`, true);
       }
-
-      // Unregister Service Workers
-      if ('serviceWorker' in navigator) {
-        navigator.serviceWorker.getRegistrations().then(registrations => {
-          for (const registration of registrations) {
-            registration.unregister();
-          }
-        });
-      }
+      saveSession(null);
+      sessionStorage.removeItem('usos_request_token_secret');
+      setGrades([]); setPlanResult(null); setDetails(null); setHistory([]);
+      setEls(null); setCredits(null); setFinanceSnapshot(EMPTY_FINANCE_SNAPSHOT);
     }
-  }, []);
+  }, [showToast]);
 
   const handleExpiredSession = useCallback(() => {
     if (!activeSessionKeyRef.current || sessionExpiryHandledRef.current) return;
@@ -909,8 +643,7 @@ function App() {
     const message = t('general.sessionExpired');
     setGlobalError(message);
     showToast(message);
-    applySession(null);
-  }, [applySession, showToast, t]);
+  }, [showToast, t]);
 
   const handleSessionError = useCallback((error: unknown): boolean => {
     if (!isSessionExpiredError(error)) return false;
@@ -920,6 +653,7 @@ function App() {
 
   const ensureSessionStillValid = useCallback(async (sess: SessionData, force = false): Promise<boolean> => {
     if (!navigator.onLine) return true;
+    if (sessionExpiryHandledRef.current) return false;
 
     const key = getSessionSignature(sess);
     const recentCheck = lastSessionCheckRef.current;
@@ -936,6 +670,7 @@ function App() {
         await validateSession(sess);
         if (activeSessionKeyRef.current === key) {
           lastSessionCheckRef.current = { key, ts: Date.now() };
+          saveSession({ ...sess, persistedAt: Date.now() });
         }
         return true;
       } catch (error) {
@@ -1000,14 +735,13 @@ function App() {
       loginWithUsos(verifier, token, secret)
         .then(s => {
           applySession(s);
-          schedulePhoneViewportRefresh();
           showToast('Zalogowano przez USOS');
           sessionStorage.removeItem('usos_request_token_secret');
         })
         .catch(e => showGlobalError(e, 'Błąd logowania USOS.'))
         .finally(() => setGlobalLoad(false));
     }
-  }, [applySession, schedulePhoneViewportRefresh, showGlobalError, showToast]);
+  }, [applySession, showGlobalError, showToast]);
 
   const updateActiveStudy = useCallback((id: string | null) => {
     setSession(prev => (prev ? { ...prev, activeStudyId: id } : prev));
@@ -1015,236 +749,62 @@ function App() {
 
   // ── Data loading with cache-first strategy ────────────────────────────────
 
-  const loadStudiesData = useCallback(async (sess: SessionData) => {
-    if (!(await ensureSessionStillValid(sess))) return;
+  const allowNetwork = useCallback(async (sess: SessionData | null, module: ResourceModule, manual: boolean, fresh: boolean, hasCache: boolean) => {
+    const scope = sess ? `${sess.userId}:${sess.activeStudyId || ''}` : 'public';
+    const decision = beginRefresh(scope, module, manual, fresh, hasCache);
+    if (!decision.allow) {
+      if (manual) showToast(decision.reason === 'offline' ? 'Tryb offline. Pokazuję zapisane dane.'
+        : decision.reason === 'inflight' ? 'Odświeżanie już trwa.'
+        : 'Dane są zapisane. Kolejne odświeżenie będzie dostępne za kilka minut.');
+      return false;
+    }
+    if (sess && !(await ensureSessionStillValid(sess))) { finishRefresh(scope, module, false); return false; }
+    return true;
+  }, [ensureSessionStillValid, showToast]);
 
-    // Show cached first
-    const cached = cache.loadStudiesForce() ?? [];
-    const cachedIsOnlyFallback = cached.length === 1
-      && (cached[0].przynaleznoscId === 'usos-profile' || /^Student\s+\S+/i.test(cached[0].label));
-    if (cached.length && !cachedIsOnlyFallback) {
+  const loadStudiesData = useCallback(async (sess: SessionData) => {
+    const cached = cache.loadStudiesForce();
+    if (cached) {
       setStudies(cached);
-      if (!sess.activeStudyId && cached[0].przynaleznoscId) {
-        updateActiveStudy(cached[0].przynaleznoscId);
-      }
+      if (!sess.activeStudyId && cached[0]?.przynaleznoscId) updateActiveStudy(cached[0].przynaleznoscId);
     }
-    // Fresh if TTL expired or no cache
-    if (!cache.loadStudies() || cachedIsOnlyFallback) {
-      setGlobalLoad(true);
-      setGlobalError('');
-      try {
-        const fresh = await fetchCombinedStudies(sess);
-        cache.saveStudies(fresh);
-        setStudies(fresh);
-        if (!sess.activeStudyId && fresh[0].przynaleznoscId) {
-          updateActiveStudy(fresh[0].przynaleznoscId);
-        }
-      } catch (e) {
-        if (handleSessionError(e)) return;
-        if (cached.length && cachedIsOnlyFallback) setStudies(cached);
-        if (!cached.length || cachedIsOnlyFallback) showGlobalError(e, 'Nie można pobrać kierunków.');
-      } finally {
-        setGlobalLoad(false);
-      }
-    }
-  }, [ensureSessionStillValid, handleSessionError, showGlobalError, updateActiveStudy]);
+    if (!(await allowNetwork(sess, 'studies', false, !!cache.loadStudies(), cached !== null))) return;
+    const scope = `${sess.userId}:${sess.activeStudyId || ''}`;
+    if (!cached) setGlobalLoad(true);
+    try {
+      const fresh = await fetchCombinedStudies(sess);
+      cache.saveStudies(fresh); setStudies(fresh);
+      if (!sess.activeStudyId && fresh[0]?.przynaleznoscId) updateActiveStudy(fresh[0].przynaleznoscId);
+      finishRefresh(scope, 'studies', true);
+    } catch (error) {
+      finishRefresh(scope, 'studies', false);
+      if (!handleSessionError(error) && !cached && navigator.onLine) showGlobalError(error, 'Nie można pobrać kierunków.');
+    } finally { setGlobalLoad(false); }
+  }, [allowNetwork, handleSessionError, showGlobalError, updateActiveStudy]);
 
   useEffect(() => {
     if (!session) { setStudies([]); return; }
     void loadStudiesData(session);
   }, [session, loadStudiesData]);
 
-  const resolveActivePlanSearch = useCallback((search?: { category: string; query: string }) => {
-    const query = (search?.query ?? planSearchQ).trim();
-    if (!query) {
-      return { category: 'album', query: '' };
-    }
+  const { load: loadPlanData, window: planWindow } = useTimetable({
+    session, mode: planViewMode, date: planDate, search: { category: planSearchCat, query: planSearchQ },
+    onResult: setPlanResult, onLoading: setPlanLoading, onUpdated: setPlanUpdatedAt,
+    ensureValid: ensureSessionStillValid, onError: showGlobalError, onToast: showToast,
+  });
 
-    return {
-      category: (search?.category ?? planSearchCat).trim() || 'album',
-      query,
-    };
-  }, [planSearchCat, planSearchQ]);
-
-  const loadPlanWindowData = useCallback(async (
-    windowCacheKey: string,
-    windowRequestKey: string,
-    dateToUse: string,
-    searchParam: { category: string; query: string },
-    forceRefresh: boolean,
-  ) => {
-    const existingPromise = !forceRefresh ? planWindowRequestsRef.current[windowRequestKey] : undefined;
-    if (existingPromise) {
-      return existingPromise;
-    }
-
-    const requestPromise = fetchPlanWindow(session as SessionData, {
-      viewMode: planViewMode,
-      currentDate: dateToUse,
-      studyId: activeStudyId,
-      search: searchParam,
-      prefetchDaysBefore: PLAN_PREFETCH_DAYS_BACK,
-      prefetchDaysAfter: PLAN_PREFETCH_DAYS_FORWARD,
-    }).then((planWindow) => {
-      planWindowCacheRef.current[windowCacheKey] = planWindow;
-      return planWindow;
+  useEffect(() => {
+    if (!currentPlanAlbum) return;
+    let cancelled = false;
+    void loadPersistedPlanHiddenSubjects(currentPlanAlbum).then((keys) => {
+      if (!cancelled) setPlanHiddenSubjectsForAlbum(currentPlanAlbum, keys);
     });
+    return () => { cancelled = true; };
+  }, [currentPlanAlbum, loadPersistedPlanHiddenSubjects, setPlanHiddenSubjectsForAlbum]);
 
-    const trackedPromise = requestPromise.finally(() => {
-      if (planWindowRequestsRef.current[windowRequestKey] === trackedPromise) {
-        delete planWindowRequestsRef.current[windowRequestKey];
-      }
-    });
-
-    planWindowRequestsRef.current[windowRequestKey] = trackedPromise;
-    return trackedPromise;
-  }, [activeStudyId, planViewMode, session]);
-
-  const hydratePlanHiddenSubjects = useCallback((album: string, requestId: string) => {
-    const normalizedAlbum = album.trim();
-    if (!normalizedAlbum) return;
-    void loadPersistedPlanHiddenSubjects(normalizedAlbum).then((keys) => {
-      if (planRequestIdRef.current !== requestId) return;
-      setPlanHiddenSubjectsForAlbum(normalizedAlbum, keys);
-    });
-  }, [loadPersistedPlanHiddenSubjects, setPlanHiddenSubjectsForAlbum]);
-
-  const loadPlanData = useCallback(async (search?: { category: string; query: string }, forceRefresh = false, newDate?: string) => {
-    if (!session) return;
-    const dateToUse = newDate || planDate;
-    const cacheKey = planCacheKey(planViewMode, dateToUse, activeStudyId);
-    const searchParam = resolveActivePlanSearch(search);
-    const isSearch = !!searchParam.query;
-    const windowCacheKey = buildPlanWindowCacheKey(activeStudyId, searchParam);
-    const windowRequestKey = `${windowCacheKey}:${planViewMode}:${dateToUse}`;
-    const cachedPlanWindow = !forceRefresh ? planWindowCacheRef.current[windowCacheKey] : null;
-    const hasCoveringPlanWindow = !!(cachedPlanWindow && doesPlanWindowCoverView(cachedPlanWindow, planViewMode, dateToUse));
-
-    // Create unique request ID to cancel old requests
-    const requestId = Math.random().toString(36).substr(2, 9);
-    planRequestIdRef.current = requestId;
-
-    if (!isSearch && !forceRefresh) {
-      const freshCachedPlan = cache.loadPlan(cacheKey);
-      if (freshCachedPlan) {
-        setGlobalError('');
-        setPlanResult(freshCachedPlan);
-        setPlanUpdatedAt(cache.loadPlanTimestamp(cacheKey));
-        hydratePlanHiddenSubjects(freshCachedPlan.debug.album || '', requestId);
-        setPlanLoading(false);
-        return;
-      }
-    }
-
-    if (!(await ensureSessionStillValid(session))) {
-      if (planRequestIdRef.current === requestId) {
-        setPlanLoading(false);
-      }
-      return;
-    }
-
-    // Show cached immediately without spinner (but not if forcing refresh)
-    let hasCached = false;
-    if (hasCoveringPlanWindow && cachedPlanWindow) {
-      hasCached = true;
-      const bufferedResult = buildPlanResultFromWindow(cachedPlanWindow, {
-        viewMode: planViewMode,
-        currentDate: dateToUse,
-      });
-      if (!isSearch) cache.savePlan(cacheKey, bufferedResult);
-      setPlanResult(bufferedResult);
-      hydratePlanHiddenSubjects(bufferedResult.debug.album || '', requestId);
-    } else if (!isSearch && !forceRefresh) {
-      const cached = cache.loadPlanForce(cacheKey);
-      if (cached) {
-        hasCached = true;
-        setPlanResult(cached);
-        setPlanUpdatedAt(cache.loadPlanTimestamp(cacheKey));
-        hydratePlanHiddenSubjects(cached.debug.album || '', requestId);
-      }
-      // Task 7: Reuse week cache for day view
-      if (!cached && planViewMode === 'day' && planResult && planResult.dayColumns) {
-        const dayCol = planResult.dayColumns.find(c => c.date === dateToUse);
-        if (dayCol) {
-          const syntheticResult: PlanResult = {
-            ...planResult,
-            dayColumns: [dayCol],
-            currentDate: dateToUse,
-            headerLabel: dateToUse,
-            prevDate: addDaysYmd(dateToUse, -1),
-            nextDate: addDaysYmd(dateToUse, 1),
-          };
-          hasCached = true;
-          setPlanResult(syntheticResult);
-          hydratePlanHiddenSubjects(syntheticResult.debug.album || '', requestId);
-        }
-      }
-    }
-
-    // Only show spinner if no cache or searching
-    if (!hasCached) {
-      setPlanLoading(true);
-    }
-    setGlobalError('');
-
-    if (hasCoveringPlanWindow && !forceRefresh) {
-      if (planRequestIdRef.current === requestId) {
-        setPlanLoading(false);
-      }
-      return;
-    }
-
-    try {
-      const planWindow = await loadPlanWindowData(
-        windowCacheKey,
-        windowRequestKey,
-        dateToUse,
-        searchParam,
-        forceRefresh,
-      );
-
-      // Check if this request is still current (not cancelled by newer request)
-      if (planRequestIdRef.current !== requestId) {
-        return; // Newer request is in progress, discard this result
-      }
-
-      const result = buildPlanResultFromWindow(planWindow, {
-        viewMode: planViewMode,
-        currentDate: dateToUse,
-      });
-      if (!isSearch) cache.savePlan(cacheKey, result);
-      setPlanResult(result);
-      setPlanUpdatedAt(Date.now());
-      hydratePlanHiddenSubjects(result.debug.album || '', requestId);
-      if (!isSearch && result.currentDate && !newDate) setPlanDate(result.currentDate);
-    } catch (e) {
-      if (planRequestIdRef.current === requestId) {
-        if (handleSessionError(e)) return;
-        if (!planResult) {
-          showGlobalError(e, 'Nie można pobrać planu.');
-        }
-      }
-    } finally {
-      if (planRequestIdRef.current === requestId) {
-        setPlanLoading(false);
-      }
-    }
-  }, [
-    session,
-    planViewMode,
-    planDate,
-    activeStudyId,
-    planResult,
-    resolveActivePlanSearch,
-    loadPlanWindowData,
-    showGlobalError,
-    ensureSessionStillValid,
-    handleSessionError,
-    hydratePlanHiddenSubjects,
-  ]);
-
-  // Fetch plan search suggestions with debouncing (300ms)
+  // Ignore out-of-order autocomplete responses.
   const fetchPlanSearchSuggestions = useCallback(async (category: string, query: string) => {
+    const request = ++suggestionSequence.current;
     if (!query.trim()) {
       setPlanSearchSuggestions([]);
       setPlanSearchLoading(false);
@@ -1253,14 +813,15 @@ function App() {
 
     setPlanSearchLoading(true);
     try {
-      const suggestions = await fetchPlanSuggestions(category, query);
-      setPlanSearchSuggestions(suggestions);
+      if (!session) return;
+      const suggestions = await fetchPlanSuggestions(session, category, query);
+      if (request === suggestionSequence.current) setPlanSearchSuggestions(suggestions);
     } catch {
-      setPlanSearchSuggestions([]);
+      if (request === suggestionSequence.current) setPlanSearchSuggestions([]);
     } finally {
-      setPlanSearchLoading(false);
+      if (request === suggestionSequence.current) setPlanSearchLoading(false);
     }
-  }, []);
+  }, [session]);
 
   const loadGradesPlanFilters = useCallback(async (forceRefresh = false) => {
     if (!session) {
@@ -1314,25 +875,18 @@ function App() {
   ]);
 
   const applyPlanSearch = useCallback((category: string, query: string) => {
-    const resolvedCategory = category.trim();
-    const resolvedQuery = query.trim();
-    if (!resolvedCategory || !resolvedQuery) return;
-
-    if (planSearchDebounceRef.current) {
-      clearTimeout(planSearchDebounceRef.current);
-      planSearchDebounceRef.current = null;
+    const value = query.trim(); if (!session || !value) return;
+    setSelectedPlanEvent(null); setPlanMoreMenuOpen(false); setPlanFiltersOpen(false);
+    if (!/\\[[^\\[\\]]+\\]$/.test(value) && category !== 'album') {
+      setPlanSearchSeed({ category, query: value });
+      setPlanSearchOpen(true);
+      void fetchPlanSearchSuggestions(category, value);
+      return;
     }
-
-    setPlanSearchCat(resolvedCategory);
-    setPlanSearchQ(resolvedQuery);
-    setPlanSearchSuggestions([]);
-    setPlanSearchLoading(false);
-    setPlanSearchOpen(false);
-    setPlanMoreMenuOpen(false);
-    setPlanFiltersOpen(false);
-    setSelectedPlanEvent(null);
-    void loadPlanData({ category: resolvedCategory, query: resolvedQuery });
-  }, [loadPlanData]);
+    setPlanSearchSeed(undefined); setPlanSearchCat(category); setPlanSearchQ(value);
+    setPlanSearchOpen(false); setPlanSearchSuggestions([]);
+    void loadPlanData({ category, query: value });
+  }, [session, fetchPlanSearchSuggestions, loadPlanData]);
 
   const resetPlanSearch = useCallback(() => {
     const shouldReloadPlan = planSearchOpen || !!planSearchQ.trim();
@@ -1367,163 +921,92 @@ function App() {
   }, [screen, planSearchOpen, planSearchQ, resetPlanSearch]);
 
   const loadGradesData = useCallback(async (forceRefresh = false) => {
-    if (!session) {
-      setGrades([]);
-      return;
-    }
-
-    if (!(await ensureSessionStillValid(session))) return;
-
-    const gradesCacheBase = session.userId || 'usos';
-    const gradesCacheKey = `${gradesCacheBase}_active_terms_v4`;
-    const gradesCacheKeys = [gradesCacheKey, `${gradesCacheBase}_active_terms_v3`];
-    const resolveGradesUpdatedAt = () => {
-      for (const key of gradesCacheKeys) {
-        const timestamp = cache.loadGradesTimestamp(key);
-        if (timestamp) return timestamp;
-      }
-      return 0;
-    };
-    let hasCachedGrades = false;
-    const cachedCreditSummary = activeStudyId ? cache.loadInfoForce(activeStudyId)?.credits : null;
-    if (cachedCreditSummary) setCredits(cachedCreditSummary);
-    if (!forceRefresh) {
-      const cached = gradesCacheKeys.map((key) => cache.loadGradesForce(key)).find((items): items is Grade[] => Boolean(items));
-      if (cached) {
-        const cleanedCached = keepRealGrades(cached);
-        hasCachedGrades = cleanedCached.length > 0;
-        setGrades(cleanedCached);
-        setGradesUpdatedAt(resolveGradesUpdatedAt());
-      }
-      const freshCached = gradesCacheKeys.map((key) => cache.loadGrades(key)).find((items): items is Grade[] => Boolean(items));
-      if (freshCached) {
-        const cleanedFreshCached = keepRealGrades(freshCached);
-        cache.saveGrades(gradesCacheKey, cleanedFreshCached);
-        setGrades(cleanedFreshCached);
-        setGradesUpdatedAt(resolveGradesUpdatedAt());
-        return;
-      }
-    }
-
-    setGradesLoad(true);
-    setGlobalError('');
+    if (!session) return;
+    const scope = `${session.userId}:${activeStudyId || ''}`;
+    const key = `${session.userId}_active_terms_v4`;
+    const cached = cache.loadGradesForce(key);
+    const info = activeStudyId ? cache.loadInfoForce(activeStudyId) : null;
+    const savedCredits = cache.loadCreditsForce(activeStudyId || '') ?? info?.credits;
+    if (savedCredits) setCredits(savedCredits);
+    if (cached) { setGrades(keepRealGrades(cached)); setGradesUpdatedAt(cache.loadGradesTimestamp(key)); }
+    if (!(await allowNetwork(session, 'grades', forceRefresh, cache.loadGrades(key) !== null, cached !== null))) return;
+    setGradesLoad(true); setGlobalError('');
     try {
-      const [gradesResult, creditsResult] = await Promise.allSettled([
+      const [result, summary] = await Promise.allSettled([
         fetchCombinedGrades(session),
-        fetchCreditSummary(session, activeStudyId),
+        forceRefresh || !savedCredits ? fetchCreditSummary(session, activeStudyId) : Promise.resolve(savedCredits),
       ]);
-
-      if (creditsResult.status === 'fulfilled' && creditsResult.value) {
-        setCredits(creditsResult.value);
+      if (result.status === 'rejected') throw result.reason;
+      if (summary.status === 'fulfilled' && summary.value) {
+        setCredits(summary.value); cache.saveCredits(activeStudyId || '', summary.value);
       }
-      if (gradesResult.status === 'rejected') {
-        throw gradesResult.reason;
-      }
-
-      const fresh = keepRealGrades(gradesResult.value);
-      cache.saveGrades(gradesCacheKey, fresh);
-      setGrades(fresh);
-      setGradesUpdatedAt(Date.now());
-    } catch (e) {
-      if (handleSessionError(e)) return;
-      if (!hasCachedGrades && !gradesRef.current.length) {
-        showGlobalError(e, 'Nie można pobrać ocen.');
-      } else {
-        showToast('USOS jest chwilowo niedostępny, pokazuję zapisane oceny.');
-      }
-    } finally {
-      setGradesLoad(false);
-    }
-  }, [session, activeStudyId, ensureSessionStillValid, handleSessionError, showGlobalError, showToast]);
+      const fresh = keepRealGrades(result.value);
+      cache.saveGrades(key, fresh); setGrades(fresh); setGradesUpdatedAt(Date.now());
+      finishRefresh(scope, 'grades', true);
+    } catch (error) {
+      finishRefresh(scope, 'grades', false);
+      if (!handleSessionError(error) && !cached && !gradesRef.current.length && navigator.onLine) showGlobalError(error, 'Nie można pobrać ocen.');
+      else if (forceRefresh && navigator.onLine) showToast('Pokazuję zapisane oceny. USOS jest chwilowo niedostępny.');
+    } finally { setGradesLoad(false); }
+  }, [session, activeStudyId, allowNetwork, handleSessionError, showGlobalError, showToast]);
 
   const loadFinanceData = useCallback(async (forceRefresh = false) => {
-    if (!session || !activeStudyId) {
-      setFinanceSnapshot({ ...EMPTY_FINANCE_SNAPSHOT });
-      return;
-    }
-
-    if (!(await ensureSessionStillValid(session))) return;
-
-    const forced = cache.loadFinanceForce(activeStudyId);
-    if (forced) {
-      setFinanceSnapshot(forced);
-    }
-
-    if (cache.loadFinance(activeStudyId) && !forceRefresh) return;
-
-    setFinanceLoading(true);
-    setGlobalError('');
+    if (!session || !activeStudyId) return;
+    const scope = `${session.userId}:${activeStudyId}`;
+    const saved = cache.loadFinanceForce(activeStudyId);
+    if (saved) setFinanceSnapshot(saved);
+    if (!(await allowNetwork(session, 'finance', forceRefresh, !!cache.loadFinance(activeStudyId), saved !== null))) return;
+    setFinanceLoading(true); setGlobalError('');
     try {
       const records = await fetchFinance(session, activeStudyId);
       const snapshot: FinanceSnapshot = { records, fetchedAt: Date.now() };
-      cache.saveFinance(activeStudyId, snapshot);
-      setFinanceSnapshot(snapshot);
-    } catch (e) {
-      if (handleSessionError(e)) return;
-      if (!forced) {
-        showGlobalError(e, 'Nie można pobrać finansów.');
-      }
-    } finally {
-      setFinanceLoading(false);
-    }
-  }, [session, activeStudyId, ensureSessionStillValid, handleSessionError, showGlobalError]);
+      cache.saveFinance(activeStudyId, snapshot); setFinanceSnapshot(snapshot);
+      finishRefresh(scope, 'finance', true);
+    } catch (error) {
+      finishRefresh(scope, 'finance', false);
+      if (!handleSessionError(error) && !saved && navigator.onLine) showGlobalError(error, 'Nie można pobrać finansów.');
+    } finally { setFinanceLoading(false); }
+  }, [session, activeStudyId, allowNetwork, handleSessionError, showGlobalError]);
 
   const loadInfoData = useCallback(async (forceRefresh = false) => {
     if (!session || !activeStudyId) return;
-    if (!(await ensureSessionStillValid(session))) return;
-    const forceCached = cache.loadInfoForce(activeStudyId);
-    if (forceCached && !forceRefresh) {
-      setDetails(forceCached.details);
-      setHistory(forceCached.history);
-      if (forceCached.els) setEls(forceCached.els);
-      if (forceCached.calendarEvents) setCalendarEvents(forceCached.calendarEvents);
-      if ('credits' in forceCached) setCredits(forceCached.credits ?? null);
+    const scope = `${session.userId}:${activeStudyId}`;
+    const saved = cache.loadInfoForce(activeStudyId);
+    if (saved) {
+      setDetails(saved.details); setHistory(saved.history); setEls(saved.els ?? null);
+      setCalendarEvents(saved.calendarEvents ?? []);
+      setCredits(cache.loadCreditsForce(activeStudyId) ?? saved.credits ?? null);
     }
-    if (cache.loadInfo(activeStudyId) && !forceRefresh) return; // fresh cache, skip fetch
-    setInfoLoading(true);
-    setGlobalError('');
+    if (!(await allowNetwork(session, 'info', forceRefresh, !!cache.loadInfo(activeStudyId), saved !== null))) return;
+    setInfoLoading(true); setGlobalError('');
     try {
-      const [infoResult, creditsResult] = await Promise.allSettled([
-        fetchInfo(session, activeStudyId),
-        fetchCreditSummary(session, activeStudyId),
-      ]);
-
-      if (infoResult.status === 'rejected') throw infoResult.reason;
-
-      const payload = {
-        ...infoResult.value,
-        credits: creditsResult.status === 'fulfilled' ? creditsResult.value : null,
-      };
+      const [info, summary] = await Promise.allSettled([fetchInfo(session, activeStudyId), fetchCreditSummary(session, activeStudyId)]);
+      if (info.status === 'rejected') throw info.reason;
+      const payload = { ...info.value, credits: summary.status === 'fulfilled' ? summary.value : saved?.credits ?? null };
       cache.saveInfo(activeStudyId, payload);
-      setDetails(payload.details);
-      setHistory(payload.history);
-      setEls(payload.els ?? null);
-      setCalendarEvents(payload.calendarEvents ?? []);
-      setCredits(payload.credits ?? null);
-    } catch (e) {
-      if (handleSessionError(e)) return;
-      if (!forceCached) showGlobalError(e, 'Nie można pobrać danych.');
-    } finally {
-      setInfoLoading(false);
-    }
-  }, [session, activeStudyId, ensureSessionStillValid, handleSessionError, showGlobalError]);
+      if (payload.credits) cache.saveCredits(activeStudyId, payload.credits);
+      setDetails(payload.details); setHistory(payload.history); setEls(payload.els ?? null);
+      setCalendarEvents(payload.calendarEvents ?? []); setCredits(payload.credits);
+      finishRefresh(scope, 'info', true);
+    } catch (error) {
+      finishRefresh(scope, 'info', false);
+      if (!handleSessionError(error) && !saved && navigator.onLine) showGlobalError(error, 'Nie można pobrać danych.');
+    } finally { setInfoLoading(false); }
+  }, [session, activeStudyId, allowNetwork, handleSessionError, showGlobalError]);
 
   const loadNewsData = useCallback(async (forceRefresh = false) => {
-    const forced = cache.loadNewsForce() ?? [];
-    if (forced.length && !forceRefresh) setNews(forced);
-    if (cache.loadNews() && !forceRefresh) return;
-    setNewsLoading(true);
-    setGlobalError('');
+    const saved = cache.loadNewsForce();
+    if (saved) setNews(saved);
+    if (!(await allowNetwork(null, 'news', forceRefresh, !!cache.loadNews(), saved !== null))) return;
+    setNewsLoading(true); setGlobalError('');
     try {
-      const items = await fetchNews();
-      cache.saveNews(items);
-      setNews(items);
-    } catch (e) {
-      if (!forced.length) showGlobalError(e, 'Nie można pobrać aktualności.');
-    } finally {
-      setNewsLoading(false);
-    }
-  }, [showGlobalError]);
+      const items = await fetchNews(); cache.saveNews(items); setNews(items);
+      finishRefresh('public', 'news', true);
+    } catch (error) {
+      finishRefresh('public', 'news', false);
+      if (!saved && navigator.onLine) showGlobalError(error, 'Nie można pobrać aktualności.');
+    } finally { setNewsLoading(false); }
+  }, [allowNetwork, showGlobalError]);
 
   const loadStatsData = useCallback(async (forceRefresh = false) => {
     if (!session || !canOpenStats) return;
@@ -1596,7 +1079,7 @@ function App() {
 
     if (screen === 'plan') void loadPlanData();
     if (screen === 'grades') {
-      void loadGradesData(true);
+      void loadGradesData();
       window.setTimeout(() => void loadGradesPlanFilters(true), 650);
     }
     if (screen === 'finance') void loadFinanceData();
@@ -1810,50 +1293,8 @@ function App() {
 
   const visiblePlanResult = useMemo(() => {
     if (!planResult) return null;
-    if (!hiddenPlanSubjectKeys.length) return planResult;
-
-    const hiddenKeys = new Set(hiddenPlanSubjectKeys);
-    const dayColumns = planResult.dayColumns.map((column) => ({
-      ...column,
-      events: relayoutDayEvents(
-        column.events.filter((event) => !hiddenKeys.has(getPlanEventFilterKey(event))),
-      ),
-    }));
-    const visibleDates = new Set(dayColumns.filter((column) => column.events.length > 0).map((column) => column.date));
-    const monthGrid = planResult.monthGrid.map((week) => week.map((cell) => ({
-      ...cell,
-      hasPlan: visibleDates.has(cell.date),
-    })));
-
-    return {
-      ...planResult,
-      dayColumns,
-      monthGrid,
-      hasAnyEventsInRange: dayColumns.some((column) => column.events.length > 0),
-    };
+    return filterTimetable(planResult, hiddenPlanSubjectKeys);
   }, [planResult, hiddenPlanSubjectKeys]);
-
-  const weekLayout = useMemo(() => {
-    const startMin = 6 * 60;
-    const endMin = 22 * 60;
-    const hh = settings.compactPlan ? 40 : 48;
-    const slots: number[] = [];
-    for (let m = startMin; m < endMin; m += 60) slots.push(m);
-    if (!slots.length) slots.push(startMin);
-    return { startMin, endMin, hourHeight: hh, slots };
-  }, [settings.compactPlan]);
-
-  const weekVisibleColumns = useMemo(() => {
-    const cols = visiblePlanResult?.dayColumns ?? [];
-    const weekendCols = cols.filter(col => isWeekendDate(col.date));
-    const hideWeekend = weekendCols.length === 2 && weekendCols.every(col => col.events.length === 0);
-    if (!hideWeekend) return cols;
-    const workweekCols = cols.filter(col => !isWeekendDate(col.date));
-    return workweekCols.length > 0 ? workweekCols : cols;
-  }, [visiblePlanResult?.dayColumns]);
-
-  const weekTrackH = weekLayout.slots.length * weekLayout.hourHeight;
-  const min2px = weekLayout.hourHeight / 60;
 
   const openScreen = useCallback((s: Exclude<ScreenKey, 'login' | 'news-detail'>) => {
     if (s === screen) {
@@ -1943,27 +1384,6 @@ function App() {
     showToast,
   ]);
 
-  // ── Login ─────────────────────────────────────────────────────────────────
-  // ── Install tip helpers ───────────────────────────────────────────────────
-  const dismissInstallTip = () => {
-    localStorage.setItem(INSTALL_TIP_KEY, '1');
-    setToast('Możesz to zrobić później w zakładce "O aplikacji"');
-    setInstallTipFading(true);
-    setTimeout(() => setShowInstallTip(false), 300);
-  };
-
-  const handleInstallTipInstall = async () => {
-    localStorage.setItem(INSTALL_TIP_KEY, '1');
-    setInstallTipFading(true);
-    setTimeout(() => setShowInstallTip(false), 300);
-    if (isIosSafari) {
-      // Small delay so tip fades first, then instructions appear
-      setTimeout(() => setShowIosInstructions(true), 320);
-    } else {
-      await handleInstallPwa();
-    }
-  };
-
   // ── AppBar logic ──────────────────────────────────────────────────────────
   const onNavIcon = () => setDrawerOpen(true);
 
@@ -1981,83 +1401,6 @@ function App() {
     { key: 'about', label: t('drawer.about'), icon: 'about' },
   ];
   const moreDrawerItems = drawerItems.filter((item) => !['home', 'plan', 'info', 'grades'].includes(item.key));
-
-  // ── Plan carousel animation helpers ─────────────────────────────────────────
-  function applyCarouselTransform(x: number, animated: boolean, duration: number = MOTION_MS.panel) {
-    const el = carouselRef.current;
-    if (!el) return;
-    el.style.transition = animated ? `transform ${duration}ms ${MOTION_EASE}` : 'none';
-    el.style.transform = x === 0 ? '' : `translate3d(${x}px, 0, 0)`;
-  }
-
-  function commitPlanNavigate(targetDate: string, exitRight: boolean) {
-    const exitX = exitRight ? window.innerWidth : -window.innerWidth;
-    const enterX = -exitX;
-    applyCarouselTransform(exitX, true, MOTION_MS.standard);
-    setTimeout(() => {
-      if (carouselRef.current) {
-        carouselRef.current.style.transition = 'none';
-        carouselRef.current.style.transform = `translate3d(${enterX}px, 0, 0)`;
-      }
-      const isSearch = !!(planSearchQ?.trim());
-      if (isSearch) void loadPlanData({ category: planSearchCat, query: planSearchQ.trim() }, false, targetDate);
-      else setPlanDate(targetDate);
-      requestAnimationFrame(() => requestAnimationFrame(() => applyCarouselTransform(0, true, MOTION_MS.panel)));
-    }, MOTION_MS.standard);
-  }
-
-  // ── Plan touch swipe handlers ─────────────────────────────────────────────
-  const onPlanTouchStart = (e: React.TouchEvent) => {
-    if (e.touches.length !== 1) return;
-    // Give priority to drawer swipe from left edge
-    if (e.touches[0].clientX <= 44) return;
-    planDragRef.current = {
-      startX: e.touches[0].clientX,
-      startY: e.touches[0].clientY,
-      startTime: Date.now(),
-      locked: false,
-    };
-  };
-
-  const onPlanTouchMove = (e: React.TouchEvent) => {
-    const drag = planDragRef.current;
-    if (!drag || !carouselRef.current) return;
-    const dx = e.touches[0].clientX - drag.startX;
-    const dy = e.touches[0].clientY - drag.startY;
-    if (!drag.locked) {
-      const absX = Math.abs(dx);
-      const absY = Math.abs(dy);
-      if (absX < 10 && absY < 10) return;
-      if (absY > absX) {
-        planDragRef.current = null;
-        return;
-      }
-      if (absX < absY * 1.2) return;
-      drag.locked = true;
-      carouselRef.current.style.transition = 'none';
-    }
-    e.preventDefault();
-    carouselRef.current.style.transform = `translate3d(${dx}px, 0, 0)`;
-  };
-
-  const onPlanTouchEnd = (e: React.TouchEvent) => {
-    const drag = planDragRef.current;
-    planDragRef.current = null;
-    if (!drag?.locked) { applyCarouselTransform(0, true); return; }
-    if (!visiblePlanResult || planLoading) { applyCarouselTransform(0, true); return; }
-    const dx = e.changedTouches[0].clientX - drag.startX;
-    const dt = Math.max(1, Date.now() - drag.startTime);
-    const velocity = Math.abs(dx) / dt;
-    if (Math.abs(dx) < 50 && velocity < 0.35) { applyCarouselTransform(0, true); return; }
-    const targetDate = dx > 0 ? visiblePlanResult.prevDate : visiblePlanResult.nextDate;
-    if (!targetDate) { applyCarouselTransform(0, true); return; }
-    commitPlanNavigate(targetDate, dx > 0);
-  };
-
-  const onPlanTouchCancel = () => {
-    planDragRef.current = null;
-    applyCarouselTransform(0, true);
-  };
 
   // ─────────────────────────────────────────────────────── render screens ──
 
@@ -2086,594 +1429,18 @@ function App() {
     const activeStudyLabel = studies.find((study) => study.przynaleznoscId === activeStudyId)?.label
       ?? studies[0]?.label
       ?? '';
-    return <HomeScreen session={session} studyLabel={activeStudyLabel} isOnline={isOnline} t={t} openScreen={openScreen} />;
+    return <HomeScreen key={session?.userId} session={session} studyLabel={activeStudyLabel} isOnline={isOnline} t={t} openScreen={openScreen}
+      editing={homeEditing} onEditing={setHomeEditing} onSearch={(query) => { openScreen('plan'); applyPlanSearch('teacher', query); }} />;
   }
 
-  function getPeriodDisplayName(key: string): string {
-    return t(`periodName.${key}`) !== `periodName.${key}` ? t(`periodName.${key}`) : key.replace(/_/g, ' ');
-  }
-
-  function getPeriodKind(key: string): 'session' | 'break' | 'holiday' {
-    if (key.startsWith('sesja_')) return 'session';
-    if (key.startsWith('przerwa_')) return 'break';
-    return 'holiday';
-  }
-
-  interface PeriodMarker { label: string; kind: 'session' | 'break' | 'holiday'; }
-
-  // Returns markers for day boundaries (end of previous period, start of new period)
-  function getPeriodTransitionMarkers(date: string, prevDate: string | null, periods: SessionPeriod[]): PeriodMarker[] {
-    const markers: PeriodMarker[] = [];
-    for (const p of periods) {
-      if (prevDate && p.end >= prevDate && p.end < date) {
-        markers.push({ label: `${t('period.end')}: ${getPeriodDisplayName(p.key)}`, kind: getPeriodKind(p.key) });
-      }
-      if (p.start === date) {
-        markers.push({ label: `${t('period.start')}: ${getPeriodDisplayName(p.key)}`, kind: getPeriodKind(p.key) });
-      }
-    }
-    return markers;
-  }
-
-  // Returns periods that are ACTIVE on a given date (date falls within start..end)
-  function getActivePeriods(date: string, periods: SessionPeriod[]): PeriodMarker[] {
-    const markers: PeriodMarker[] = [];
-    for (const p of periods) {
-      if (date >= p.start && date <= p.end) {
-        markers.push({ label: getPeriodDisplayName(p.key), kind: getPeriodKind(p.key) });
-      }
-    }
-    return markers;
-  }
-
-  function renderPeriodBanner(markers: PeriodMarker[]) {
-    if (!markers.length) return null;
-    return (
-      <div className="period-markers">
-        {markers.map((m, i) => (
-          <div key={i} className={`period-marker period-marker-${m.kind}`}>{m.label}</div>
-        ))}
-      </div>
-    );
-  }
-
-  function getWeekSeparatorPeriod(leftDate: string, rightDate: string, periods: SessionPeriod[]): PeriodMarker | null {
-    for (const p of periods) {
-      // A boundary exists if left is in period but right is not, or right is in but left is not
-      const leftIn = leftDate >= p.start && leftDate <= p.end;
-      const rightIn = rightDate >= p.start && rightDate <= p.end;
-      if (leftIn !== rightIn) {
-        return { label: getPeriodDisplayName(p.key), kind: getPeriodKind(p.key) };
-      }
-    }
-    return null;
-  }
-
-  // Legend data
-  const EVENT_LEGEND: Array<{ cls: string; label: string; color: string }> = [
-    { cls: 'ev-lecture', label: 'Wykład / Ćwiczenia', color: 'var(--ev-lecture)' },
-    { cls: 'ev-lab', label: 'Laboratorium', color: 'var(--ev-lab)' },
-    { cls: 'ev-auditory', label: 'Audytoryjne', color: 'var(--ev-auditory)' },
-    { cls: 'ev-exam', label: 'Egzamin', color: 'var(--ev-exam)' },
-    { cls: 'ev-remote', label: 'Zdalne', color: 'var(--ev-remote)' },
-    { cls: 'ev-cancelled', label: 'Odwołane', color: 'var(--ev-cancelled)' },
-    { cls: 'ev-pass', label: 'Zaliczenie', color: 'var(--ev-pass)' },
-    { cls: 'ev-project', label: 'Projekt', color: 'var(--ev-project)' },
-    { cls: 'ev-seminar', label: 'Seminarium', color: 'var(--ev-seminar)' },
-    { cls: 'ev-diploma', label: 'Dyplomowe', color: 'var(--ev-diploma)' },
-    { cls: 'ev-lectorate', label: 'Lektorat', color: 'var(--ev-lectorate)' },
-    { cls: 'ev-conservatory', label: 'Konwersatorium', color: 'var(--ev-conservatory)' },
-    { cls: 'ev-consultation', label: 'Konsultacje', color: 'var(--ev-consultation)' },
-    { cls: 'ev-field', label: 'Terenowe', color: 'var(--ev-field)' },
-  ];
-
-  const MARKER_LEGEND: Array<{ kind: string; label: string; color: string }> = [
-    { kind: 'session', label: 'Sesja egzaminacyjna', color: '#ef5350' },
-    { kind: 'break', label: 'Przerwa dydaktyczna', color: 'var(--mz-primary)' },
-    { kind: 'holiday', label: 'Święto / Dzień wolny', color: 'var(--mz-success)' },
-  ];
-
-  function renderInlineLegend(className: string) {
-    if (planLoading) return null;
-
-    // Dynamically calculate what to show in the legend based on the current week/day events
-    const cols = visiblePlanResult?.dayColumns ?? [];
-    const activeEventClasses = new Set<string>();
-    cols.forEach(col => col.events.forEach(ev => activeEventClasses.add(`ev-${ev.typeClass}`)));
-
-    const activeMarkerKinds = new Set<string>();
-    const periods = visiblePlanResult?.sessionPeriods ?? [];
-    cols.forEach(col => {
-      const markers = getActivePeriods(col.date, periods);
-      markers.forEach(m => activeMarkerKinds.add(m.kind));
-    });
-
-    const visibleEvents = EVENT_LEGEND.filter(ev => activeEventClasses.has(ev.cls));
-    const visibleMarkers = MARKER_LEGEND.filter(m => activeMarkerKinds.has(m.kind));
-
-    if (visibleEvents.length === 0 && visibleMarkers.length === 0) return null;
-
-    const legendContent = (
-      <>
-        {visibleEvents.length > 0 && (
-          <>
-            <div className="legend-section-title">{t('plan.eventTypes') || 'Typy zajęć'}</div>
-            {visibleEvents.map(ev => (
-              <div key={ev.cls} className="legend-row">
-                <div className="legend-swatch" style={{ background: ev.color }} />
-                <span className="legend-label">{ev.label}</span>
-              </div>
-            ))}
-          </>
-        )}
-
-        {visibleMarkers.length > 0 && (
-          <>
-            <div className="legend-section-title">{t('plan.periodMarkers') || 'Markery okresów'}</div>
-            {visibleMarkers.map(m => (
-              <div key={m.kind} className="legend-row">
-                <div className="legend-line-swatch" style={{ background: m.color }} />
-                <span className="legend-label">{m.label}</span>
-              </div>
-            ))}
-          </>
-        )}
-      </>
-    );
-
-    if (className.includes('plan-legend-bottom')) {
-      return (
-        <details className={`plan-legend-inline ${className}`}>
-          <summary className="plan-legend-summary">
-            <span>{t('plan.legend') || 'Legenda'}</span>
-            <span className="plan-legend-count">{visibleEvents.length + visibleMarkers.length}</span>
-            <span className="plan-legend-chevron" aria-hidden><Ic n="chevR" /></span>
-          </summary>
-          <div className="plan-legend-body">{legendContent}</div>
-        </details>
-      );
-    }
-
-    return (
-      <div className={`plan-legend-inline ${className}`}>
-        <div className="plan-legend-inline-title">{t('plan.legend') || 'Legenda'}</div>
-        {legendContent}
-      </div>
-    );
-  }
+  const navigatePlan = (date: string) => setPlanDate(date);
 
   function renderPlan() {
-    const cols = visiblePlanResult?.dayColumns ?? [];
-    const weekCols = weekVisibleColumns;
-    const today = todayYmd();
-
-    // Build week grid template with separator columns
-    const buildWeekGridTemplate = (numCols: number) => {
-      if (numCols === 0) return 'var(--plan-time-col-w, 44px)';
-      const parts: string[] = ['var(--plan-time-col-w, 44px)'];
-      for (let i = 0; i < numCols; i++) {
-        parts.push('1fr');
-        if (i < numCols - 1) {
-          const sep = weekCols.length > i + 1
-            ? getWeekSeparatorPeriod(weekCols[i].date, weekCols[i + 1].date, visiblePlanResult?.sessionPeriods ?? [])
-            : null;
-          parts.push(sep ? '3px' : '0px');
-        }
-      }
-      return parts.join(' ');
-    };
-
-    const weekGridTemplate = buildWeekGridTemplate(weekCols.length);
-    const showPlanFrameSkeleton = planLoading && !visiblePlanResult;
-    const monthCells = (visiblePlanResult?.monthGrid ?? []).flat();
-    const showMonthSkeleton = planLoading && monthCells.length === 0;
-    const weekSkeletonColumnCount = Math.max(weekCols.length, 5);
-
-    const renderPlanEventSkeletons = (scope: 'day' | 'week', key: string) => {
-      const items = scope === 'day'
-        ? [
-          { top: 84, height: 88, left: '8px', width: 'calc(100% - 16px)', titleWidth: '68%', metaWidth: '54%', extraWidth: '38%' },
-          { top: 238, height: 104, left: '8px', width: 'calc(78% - 12px)', titleWidth: '74%', metaWidth: '52%', extraWidth: '34%' },
-          { top: 372, height: 76, left: 'calc(44% + 4px)', width: 'calc(56% - 12px)', titleWidth: '64%', metaWidth: '48%', extraWidth: '30%' },
-        ]
-        : [
-          { top: 88, height: 72, left: '3px', width: 'calc(100% - 6px)', titleWidth: '76%', metaWidth: '58%', extraWidth: '' },
-          { top: 228, height: 94, left: '3px', width: 'calc(100% - 6px)', titleWidth: '66%', metaWidth: '54%', extraWidth: '' },
-        ];
-
-      return items.map((item, idx) => (
-        <div
-          key={`sk-${scope}-${key}-${idx}`}
-          className={`plan-skeleton-event plan-skeleton-event-${scope}`}
-          style={{ top: item.top, height: item.height, left: item.left, width: item.width }}
-        >
-          <Skeleton className="skeleton-line skeleton-line-sm plan-skeleton-event-line plan-skeleton-event-line-title" style={{ width: item.titleWidth }} />
-          <Skeleton className="skeleton-line skeleton-line-xs plan-skeleton-event-line" style={{ width: item.metaWidth }} />
-          {item.extraWidth && (
-            <Skeleton className="skeleton-line skeleton-line-xs plan-skeleton-event-line plan-skeleton-event-line-muted" style={{ width: item.extraWidth }} />
-          )}
-        </div>
-      ));
-    };
-
-    const renderPlanDaySkeleton = () => (
-      <div className="list-stack">
-        <div className="card day-tl-card plan-loading-card">
-          <div className="day-tl-head">
-            <Skeleton className="skeleton-line skeleton-line-sm plan-skeleton-headline" style={{ width: '156px' }} />
-            <div className="day-tl-head-right">
-              <Skeleton className="skeleton-pill plan-skeleton-chip" style={{ width: '78px' }} />
-            </div>
-          </div>
-          <div className="day-tl-body">
-            <div className="day-time-col">
-              {weekLayout.slots.map((m) => (
-                <div key={`sk-day-time-${m}`} className="day-time-cell day-time-cell-skeleton" style={{ height: weekLayout.hourHeight }}>
-                  {fmtHour(m)}
-                </div>
-              ))}
-            </div>
-
-            <div className="day-events-col" style={{ height: weekTrackH }}>
-              {weekLayout.slots.map((m, idx) => (
-                <div key={`sk-day-line-${m}`} className="day-hour-line" style={{ top: idx * weekLayout.hourHeight }} />
-              ))}
-              {renderPlanEventSkeletons('day', planDate)}
-            </div>
-          </div>
-        </div>
-      </div>
-    );
-
-    const renderPlanWeekSkeleton = () => {
-      const skeletonWeekGridTemplate = buildWeekGridTemplate(weekSkeletonColumnCount);
-
-      return (
-        <div className="card week-card plan-loading-card">
-          <div className="week-grid week-head-row" style={{ gridTemplateColumns: skeletonWeekGridTemplate }}>
-            <div className="week-head-time">{t('plan.hour')}</div>
-            {Array.from({ length: weekSkeletonColumnCount }).map((_, ci) => (
-              <React.Fragment key={`sk-week-head-${ci}`}>
-                <div className="week-head-day plan-skeleton-week-head">
-                  <Skeleton className="skeleton-line skeleton-line-xs" style={{ width: '54px' }} />
-                  <Skeleton className="skeleton-line skeleton-line-xs" style={{ width: '38px' }} />
-                </div>
-                {ci < weekSkeletonColumnCount - 1 && <div style={{ width: 0 }} />}
-              </React.Fragment>
-            ))}
-          </div>
-
-          <div className="week-grid" style={{ gridTemplateColumns: skeletonWeekGridTemplate }}>
-            <div className="week-time-col">
-              {weekLayout.slots.map((m) => (
-                <div key={`sk-week-time-${m}`} className="week-time-cell week-time-cell-skeleton" style={{ height: weekLayout.hourHeight }}>
-                  {fmtHour(m)}
-                </div>
-              ))}
-            </div>
-
-            {Array.from({ length: weekSkeletonColumnCount }).map((_, ci) => (
-              <React.Fragment key={`sk-week-col-${ci}`}>
-                <div className="week-day-col" style={{ height: weekTrackH }}>
-                  {weekLayout.slots.map((m, idx) => (
-                    <div key={`sk-week-line-${ci}-${m}`} className="week-hour-line" style={{ top: idx * weekLayout.hourHeight }} />
-                  ))}
-                  {renderPlanEventSkeletons('week', `${ci}`)}
-                </div>
-                {ci < weekSkeletonColumnCount - 1 && <div style={{ width: 0 }} />}
-              </React.Fragment>
-            ))}
-          </div>
-        </div>
-      );
-    };
-
-    const renderPlanMonthSkeleton = () => (
-      <div className="month-shell plan-loading-card">
-        <div className="month-weekdays">{MONTH_WEEKDAY_KEYS.map((k) => <span key={k}>{t(k)}</span>)}</div>
-        <div className="month-grid month-grid-skeleton">
-          {Array.from({ length: 35 }).map((_, idx) => (
-            <div key={`sk-month-${idx}`} className="month-cell month-cell-skeleton" aria-hidden>
-              <Skeleton className="skeleton-line skeleton-line-xs month-skeleton-num" style={{ width: idx % 7 === 0 ? '34%' : '26%' }} />
-              <div className="month-skeleton-dots">
-                <Skeleton className="skeleton-dot" />
-                {idx % 3 === 0 && <Skeleton className="skeleton-dot skeleton-dot-soft" />}
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
-    );
-
-    return (
-      <section className="screen plan-screen">
-        <aside className="plan-control-pane">
-          {/* Sticky Header — prev | center | next */}
-          <div className="plan-sticky-header">
-            <button type="button" className="plan-nav-btn-compact" onClick={() => {
-              const newDate = visiblePlanResult?.prevDate ?? planDate;
-              commitPlanNavigate(newDate, true);
-            }} aria-label={t('plan.prev')}>
-              <Ic n="chevL" />
-            </button>
-            <div className="plan-header-center">
-              <div className="plan-date-label-compact">{visiblePlanResult?.headerLabel || planDate}</div>
-            </div>
-            <button type="button" className="plan-nav-btn-compact" onClick={() => {
-              const newDate = visiblePlanResult?.nextDate ?? planDate;
-              commitPlanNavigate(newDate, false);
-            }} aria-label={t('plan.next')}>
-              <Ic n="chevR" />
-            </button>
-          </div>
-
-          <div className="plan-floating-toolbar">
-            {(['day', 'week', 'month'] as ViewMode[]).map(m => (
-              <button key={m} type="button" className={`plan-mode-btn-floating ${planViewMode === m ? 'active' : ''}`} onClick={() => setPlanViewMode(m)}>
-                {m === 'day' ? t('plan.day') : m === 'week' ? t('plan.week') : t('plan.month')}
-              </button>
-            ))}
-          </div>
-
-          {renderInlineLegend('plan-legend-side')}
-        </aside>
-
-        {/* Calendar Content */}
-        <div className="plan-content">
-          <div className="plan-content-surface">
-            <div className="plan-container">
-              <div
-                className="plan-carousel-track"
-                ref={carouselRef}
-                onTouchStart={onPlanTouchStart}
-                onTouchMove={onPlanTouchMove}
-                onTouchEnd={onPlanTouchEnd}
-                onTouchCancel={onPlanTouchCancel}
-              >
-                {/* Loader removed since skeleton acts as loader over timeline grid */}
-
-                {planViewMode === 'day' && (
-                  showPlanFrameSkeleton ? (
-                    renderPlanDaySkeleton()
-                  ) : (
-                    <div className="list-stack">
-                      {cols.map((col, ci) => {
-                        const periods = visiblePlanResult?.sessionPeriods ?? [];
-                        const transMarkers = getPeriodTransitionMarkers(col.date, cols[ci - 1]?.date ?? null, periods);
-                        const activeMarkers = getActivePeriods(col.date, periods);
-                        return (
-                          <div key={col.date}>
-                            {renderPeriodBanner(transMarkers)}
-                            <div className="card day-tl-card">
-                              <div className="day-tl-head">
-                                <div className="day-tl-head-date">{fmtDateLabel(col.date, settings.language)}</div>
-                                <div className="day-tl-head-right">
-                                  {col.date === today && <span className="day-tl-today-badge">{t('plan.today')}</span>}
-                                  {activeMarkers.map((m, i) => (
-                                    <span key={i} className={`day-period-chip day-period-chip-${m.kind}`}>{m.label}</span>
-                                  ))}
-                                </div>
-                              </div>
-
-                              {col.events.length === 0 && !planLoading ? (
-                                <div className="day-empty">{t('plan.emptyDay')}</div>
-                              ) : (
-                                <div className="day-tl-body">
-                                  <div className="day-time-col">
-                                    {weekLayout.slots.map(m => (
-                                      <div key={`${col.date}-${m}`} className="day-time-cell" style={{ height: weekLayout.hourHeight }}>
-                                        {fmtHour(m)}
-                                      </div>
-                                    ))}
-                                  </div>
-
-                                  <div className="day-events-col" style={{ height: weekTrackH }}>
-                                    {weekLayout.slots.map((m, idx) => (
-                                      <div key={`${col.date}-line-${m}`} className="day-hour-line" style={{ top: idx * weekLayout.hourHeight }} />
-                                    ))}
-                                    {col.date === today && nowMinute >= weekLayout.startMin && nowMinute <= weekLayout.endMin && (
-                                      <div className="now-line" style={{ top: (nowMinute - weekLayout.startMin) * min2px }} />
-                                    )}
-                                    {planLoading ? (
-                                      renderPlanEventSkeletons('day', col.date)
-                                    ) : (
-                                      col.events.map(ev => {
-                                        const top = Math.max(0, (ev.startMin - weekLayout.startMin) * min2px);
-                                        const h = Math.max(32, (ev.endMin - ev.startMin) * min2px);
-                                        const left = `calc(${ev.leftPct}% + 2px)`;
-                                        const width = `max(calc(${ev.widthPct}% - 4px), 8px)`;
-                                        const open = () => setSelectedPlanEvent({ date: col.date, event: ev });
-                                        return (
-                                          <div
-                                            key={`${col.date}-${ev.startMin}-${ev.endMin}-${ev.title}`}
-                                            className={`day-event ev-${ev.typeClass}`}
-                                            style={{ top, height: h, left, width }}
-                                            role="button"
-                                            tabIndex={0}
-                                            onClick={open}
-                                            onKeyDown={e => {
-                                              if (e.key === 'Enter' || e.key === ' ') {
-                                                e.preventDefault();
-                                                open();
-                                              }
-                                            }}
-                                            title={`${ev.startStr} - ${ev.endStr} ${ev.title}`}
-                                          >
-                                            <div className="day-event-title">{ev.title}</div>
-                                            <div className="day-event-meta">{ev.startStr}-{ev.endStr} · {ev.room}{ev.group ? ` · ${ev.group}` : ''}</div>
-                                            <div className="plan-event-type">({ev.typeCode || planTypeShort(ev.typeClass, ev.typeLabel)})</div>
-                                          </div>
-                                        );
-                                      })
-                                    )}
-                                  </div>
-                                </div>
-                              )}
-                            </div>
-                          </div>
-                        );
-                      })}
-                      {cols.length === 0 && (
-                        <div className="empty-state">
-                          <div className="empty-icon">📅</div>
-                          <p>{t('plan.emptyDayLong')}</p>
-                        </div>
-                      )}
-                    </div>
-                  )
-                )}
-
-                {planViewMode === 'week' && (
-                  showPlanFrameSkeleton ? (
-                    renderPlanWeekSkeleton()
-                  ) : (
-                    <div className="card week-card">
-                      {weekCols.length > 0 ? (
-                        <>
-                          <div className="week-grid week-head-row" style={{ gridTemplateColumns: weekGridTemplate }}>
-                            <div className="week-head-time">{t('plan.hour')}</div>
-                            {weekCols.map((col, ci) => {
-                              const wActive = getActivePeriods(col.date, visiblePlanResult?.sessionPeriods ?? []);
-                              const topPeriod = wActive.sort((a, b) => {
-                                const p: Record<string, number> = { session: 3, break: 2, holiday: 1 };
-                                return (p[b.kind] ?? 0) - (p[a.kind] ?? 0);
-                              })[0] ?? null;
-
-                              const sep = ci < weekCols.length - 1
-                                ? getWeekSeparatorPeriod(col.date, weekCols[ci + 1].date, visiblePlanResult?.sessionPeriods ?? [])
-                                : null;
-
-                              return (
-                                <React.Fragment key={`h-${col.date}`}>
-                                  <div className={`week-head-day ${col.date === today ? 'today' : ''} ${topPeriod ? `has-period-${topPeriod.kind}` : ''}`}>
-                                    <strong>{fmtWeekdayShort(col.date, settings.language)}</strong>
-                                    <span>{fmtDayMonth(col.date, settings.language)}</span>
-                                  </div>
-                                  {sep && <div className={`week-head-separator week-head-separator-${sep.kind}`} title={sep.label} />}
-                                  {ci < weekCols.length - 1 && !sep && <div style={{ width: 0 }} />}
-                                </React.Fragment>
-                              );
-                            })}
-                          </div>
-
-                          <div className="week-grid" style={{ gridTemplateColumns: weekGridTemplate }}>
-                            <div className="week-time-col">
-                              {weekLayout.slots.map(m => (
-                                <div key={`w-time-${m}`} className="week-time-cell" style={{ height: weekLayout.hourHeight }}>
-                                  {fmtHour(m)}
-                                </div>
-                              ))}
-                            </div>
-
-                            {weekCols.map((col, ci) => {
-                              const sep = ci < weekCols.length - 1
-                                ? getWeekSeparatorPeriod(col.date, weekCols[ci + 1].date, visiblePlanResult?.sessionPeriods ?? [])
-                                : null;
-                              return (
-                                <React.Fragment key={`w-col-${col.date}`}>
-                                  <div className="week-day-col" style={{ height: weekTrackH }}>
-                                    {weekLayout.slots.map((m, idx) => (
-                                      <div key={`${col.date}-week-line-${m}`} className="week-hour-line" style={{ top: idx * weekLayout.hourHeight }} />
-                                    ))}
-                                    {col.date === today && nowMinute >= weekLayout.startMin && nowMinute <= weekLayout.endMin && (
-                                      <div className="now-line" style={{ top: (nowMinute - weekLayout.startMin) * min2px }} />
-                                    )}
-                                    {planLoading ? (
-                                      renderPlanEventSkeletons('week', col.date)
-                                    ) : (
-                                      col.events.map(ev => {
-                                        const top = Math.max(0, (ev.startMin - weekLayout.startMin) * min2px);
-                                        const h = Math.max(26, (ev.endMin - ev.startMin) * min2px);
-                                        const left = `calc(${ev.leftPct}% + 2px)`;
-                                        const width = `max(calc(${ev.widthPct}% - 4px), 8px)`;
-                                        const open = () => setSelectedPlanEvent({ date: col.date, event: ev });
-                                        return (
-                                          <div
-                                            key={`w-${col.date}-${ev.startMin}-${ev.endMin}-${ev.title}`}
-                                            className={`week-event ev-${ev.typeClass}`}
-                                            style={{ top, height: h, left, width }}
-                                            role="button"
-                                            tabIndex={0}
-                                            onClick={open}
-                                            onKeyDown={e => {
-                                              if (e.key === 'Enter' || e.key === ' ') {
-                                                e.preventDefault();
-                                                open();
-                                              }
-                                            }}
-                                            title={`${ev.startStr} - ${ev.endStr} ${ev.title}`}
-                                          >
-                                            <div className="week-event-time">
-                                              <span className="event-time-full">{ev.startStr}-{ev.endStr}</span>
-                                              <span className="event-time-start">{ev.startStr}</span>
-                                            </div>
-                                            {(ev.room || ev.group) && (
-                                              <div className="week-event-context">
-                                                {[ev.room !== '-' ? ev.room : '', ev.group].filter(Boolean).join(' · ')}
-                                              </div>
-                                            )}
-                                            <div className="week-event-title">{ev.title}</div>
-                                            <div className="plan-event-type">({ev.typeCode || planTypeShort(ev.typeClass, ev.typeLabel)})</div>
-                                          </div>
-                                        );
-                                      })
-                                    )}
-                                  </div>
-                                  {sep && <div className={`week-separator-col week-separator-${sep.kind}`} />}
-                                  {ci < weekCols.length - 1 && !sep && <div style={{ width: 0 }} />}
-                                </React.Fragment>
-                              );
-                            })}
-                          </div>
-                        </>
-                      ) : (
-                        <div className="day-empty">{t('plan.emptyWeek')}</div>
-                      )}
-                    </div>
-                  )
-                )}
-
-                {planViewMode === 'month' && (
-                  showMonthSkeleton ? (
-                    renderPlanMonthSkeleton()
-                  ) : (
-                    <div className="month-shell">
-                      <div className="month-weekdays">{MONTH_WEEKDAY_KEYS.map(k => <span key={k}>{t(k)}</span>)}</div>
-                      <div className="month-grid">
-                        {monthCells.map(cell => (
-                          <div
-                            key={cell.date}
-                            className={`month-cell ${cell.inCurrentMonth ? '' : 'out'} ${cell.hasPlan ? 'has' : ''} ${cell.date === today ? 'today' : ''}`}
-                            onClick={() => {
-                              setPlanDate(cell.date);
-                              setPlanViewMode('day');
-                            }}
-                            role="button"
-                            tabIndex={0}
-                            onKeyDown={e => {
-                              if (e.key === 'Enter' || e.key === ' ') {
-                                e.preventDefault();
-                                setPlanDate(cell.date);
-                                setPlanViewMode('day');
-                              }
-                            }}
-                          >
-                            <span className="month-cell-num">{cell.date.slice(-2)}</span>
-                            {cell.hasPlan && <span className="month-dot" />}
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )
-                )}
-              </div>
-            </div>
-          </div>
-          {renderInlineLegend('plan-legend-bottom')}
-        </div>
-
-      </section>
-    );
+    return <PlanScreen result={visiblePlanResult} viewMode={planViewMode} date={planDate}
+      window={planWindow} hiddenSubjectKeys={hiddenPlanSubjectKeys}
+      loading={planLoading} compact={settings.compactPlan} language={settings.language} t={t}
+      onMode={setPlanViewMode} onNavigate={navigatePlan} onSelect={setSelectedPlanEvent}
+      onExport={handlePlanExport} />;
   }
 
   function renderGrades() {
@@ -2695,6 +1462,7 @@ function App() {
     return (
       <FinanceScreen
         t={t}
+        language={settings.language}
         studies={studies}
         activeStudyId={activeStudyId}
         updateActiveStudy={updateActiveStudy}
@@ -2723,6 +1491,7 @@ function App() {
         els={els}
         calendarEvents={calendarEvents}
         credits={credits}
+        onRefresh={() => void loadInfoData(true)}
       />
     );
   }
@@ -2732,7 +1501,7 @@ function App() {
         newsLoading={newsLoading}
         news={news}
         t={t}
-        onOpenDetail={(item) => nav.navigateTo('news-detail', 'home', { item } as unknown as NewsDetailParams)}
+        onOpenDetail={(item) => nav.navigateTo('news-detail', 'news', { item } as unknown as NewsDetailParams)}
       />
     );
   }
@@ -2780,10 +1549,11 @@ function App() {
   }
 
   function renderPlanSearchSheet() {
-    if (screen !== 'plan') return null;
+    if (screen !== 'plan' || !planSearchOpen) return null;
     return (
       <PlanSearchSheet
         planSearchOpen={planSearchOpen}
+        initialSearch={planSearchSeed}
         planSearchCat={planSearchCat}
         setPlanSearchCat={setPlanSearchCat}
         planSearchQ={planSearchQ}
@@ -2850,6 +1620,7 @@ function App() {
         onClick: () => {
           setPlanMoreMenuOpen(false);
           setPlanFiltersOpen(false);
+          setPlanSearchSeed(undefined);
           setPlanSearchOpen((p) => !p);
         },
         active: planSearchOpen,
@@ -2886,13 +1657,13 @@ function App() {
             if (planDate !== td) {
               setPlanDate(td);
             } else {
-              void loadPlanData();
+              void loadPlanData({ category: 'album', query: '' });
             }
             return;
           }
 
           if (planDate !== td) {
-            commitPlanNavigate(td, planDate > td);
+            setPlanDate(td);
           }
         },
         active: isTodayActive,
@@ -2920,8 +1691,8 @@ function App() {
         },
         active: false,
       });
-    } else if (screen === 'home' && canOfferInstall) {
-      actions.push({ key: 'install', icon: 'download', label: t('install.now'), onClick: () => void handleInstallPwa(), active: false });
+    } else if (screen === 'home') {
+      if (!homeEditing) actions.push({ key: 'edit', icon: 'edit', label: 'Edytuj kafelki', onClick: () => setHomeEditing(true), active: false });
     } else if (screen === 'grades') {
       actions.push({
         key: 'refresh',
@@ -2932,10 +1703,6 @@ function App() {
         },
         active: false,
       });
-    } else if (screen === 'finance') {
-      actions.push({ key: 'refresh', icon: 'refresh', label: t('finance.refresh'), onClick: () => void loadFinanceData(true), active: false });
-    } else if (screen === 'info') {
-      actions.push({ key: 'refresh', icon: 'refresh', label: t('plan.refresh'), onClick: () => void loadInfoData(true), active: false });
     } else if (screen === 'news') {
       actions.push({ key: 'refresh', icon: 'refresh', label: t('plan.refresh'), onClick: () => void loadNewsData(true), active: false });
     } else if (screen === 'stats') {
@@ -3031,7 +1798,6 @@ function App() {
                     </span>
                     <span className="plan-overflow-copy">
                       <span className="plan-overflow-label">{action.label}</span>
-                      <span className="plan-overflow-note">{action.note}</span>
                     </span>
                   </button>
                 ))}
@@ -3044,11 +1810,10 @@ function App() {
   }
 
   // ─────────────────────────────────────────────── render ──────────────────
-  const phoneViewportClass = `${phoneViewport.isPhone ? ' is-phone-viewport' : ''}${phoneViewport.needsScaleFix ? ' is-phone-scale-fix' : ''}`;
 
   return (
     <div
-      className={`app-shell${screen === 'login' ? ' is-login' : ''}${screen === 'plan' ? ' is-plan' : ''}${drawerOpen ? ' has-more-open' : ''}${phoneViewportClass}`}
+      className={`app-shell${screen === 'login' ? ' is-login' : ''}${screen === 'plan' ? ' is-plan' : ''}${drawerOpen ? ' has-more-open' : ''}`}
       onTouchStart={swipe.onTouchStart}
       onTouchMove={swipe.onTouchMove}
       onTouchEnd={swipe.onTouchEnd}
@@ -3060,20 +1825,20 @@ function App() {
           <header className="android-appbar plan-appbar">
             <div className="appbar-heading plan-appbar-heading">
               <h1>{t(SCREEN_I18N_KEY[screen])}</h1>
-              <span>{formatDataUpdatedAt(planUpdatedAt, settings.language)}</span>
+              <span>{planLoading && <LoadingIndicator className="sync-indicator" />}{planLoading ? (settings.language === 'en' ? 'Syncing timetable…' : 'Synchronizacja planu…') : formatDataUpdatedAt(planUpdatedAt, settings.language)}</span>
             </div>
-            <div className="plan-appbar-range">{visiblePlanResult?.headerLabel || planDate}</div>
+            <div className="plan-appbar-range" aria-live="polite" aria-atomic="true">{visiblePlanResult?.headerLabel || planDate}</div>
             {renderAppBarActions()}
           </header>
         ) : (
           <header className="android-appbar">
-            <button type="button" className={`icon-btn appbar-nav-btn${screen === 'news-detail' ? ' is-back' : ''}`} onClick={screen === 'news-detail' ? () => nav.reset('home', undefined) : onNavIcon} aria-label={screen === 'news-detail' ? t('general.back') : t('general.openMenu')}>
+            <button type="button" className={`icon-btn appbar-nav-btn${screen === 'news-detail' ? ' is-back' : ''}`} onClick={screen === 'news-detail' ? () => nav.goBack() : onNavIcon} aria-label={screen === 'news-detail' ? t('general.back') : t('general.openMenu')}>
               <Ic n={screen === 'news-detail' ? 'back' : 'menu'} />
             </button>
             {screen === 'grades' ? (
               <div className="appbar-heading">
                 <h1>{t(SCREEN_I18N_KEY[screen])}</h1>
-                <span>{formatDataUpdatedAt(gradesUpdatedAt, settings.language)}</span>
+                <span>{gradesLoading && <LoadingIndicator className="sync-indicator" />}{formatDataUpdatedAt(gradesUpdatedAt, settings.language)}</span>
               </div>
             ) : (
               <h1>{t(SCREEN_I18N_KEY[screen])}</h1>
@@ -3089,7 +1854,7 @@ function App() {
           <div className="notification-stack">
             {globalLoading && (
               <div className="banner banner-loading" role="status">
-                <div className="banner-spinner" />
+                <LoadingIndicator />
                 <div className="banner-copy">
                   <span className="banner-title">{t('banner.loading')}</span>
                 </div>
@@ -3102,7 +1867,8 @@ function App() {
                   <span className="banner-kicker">Nie udało się pobrać danych</span>
                   <span className="banner-title">{globalError}</span>
                 </div>
-                <button type="button" className="banner-retry" onClick={() => setGlobalError('')}>Zamknij</button>
+                {sessionExpiryHandledRef.current && <button type="button" className="banner-retry" onClick={() => { saveSession(null); setSession(null); setGlobalError(''); }}>Zaloguj</button>}
+              <button type="button" className="banner-retry" onClick={() => setGlobalError('')}>Zamknij</button>
               </div>
             )}
           </div>
@@ -3110,8 +1876,8 @@ function App() {
       )}
 
       {/* Main content */}
-      <main key={screen}>
-        <Suspense fallback={<ScreenChunkFallback />}>
+      <main ref={mainRef} data-screen={screen}>
+        <Suspense fallback={<ScreenChunkFallback screen={screen} gradesSummary={gradesSummary} t={t} />}>
           {renderScreen()}
         </Suspense>
       </main>
@@ -3126,104 +1892,45 @@ function App() {
         />
       )}
 
+      {!isOnline && screen !== 'login' && <div className="offline-indicator" role="status"><Ic n="wifi-off" />{settings.language === 'en' ? 'Offline · saved data' : 'Offline · zapisane dane'}</div>}
       {/* Toast */}
       {toast && <div className="toast">{toast}</div>}
-
-      {/* PWA Install Tip */}
-      {showInstallTip && (
-        <div className={`install-tip-overlay${installTipFading ? ' fading' : ''}`}>
-          <div className="install-tip-card">
-            <div className="install-tip-icon">📱</div>
-            <p className="install-tip-msg">
-              {t('install.tip')}
-            </p>
-            <div className="install-tip-actions">
-              <button
-                type="button"
-                className="install-tip-install-btn"
-                onClick={() => void handleInstallTipInstall()}
-              >
-                {isIosSafari ? t('install.howIos') : t('install.now')}
-              </button>
-              <button
-                type="button"
-                className="install-tip-dismiss-btn"
-                onClick={() => dismissInstallTip()}
-              >
-                {t('install.dismiss')}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <PwaUpdateNotice editing={homeEditing} />
 
       {/* iOS Safari install instructions */}
       {showIosInstructions && (
-        <div className="ios-inst-overlay" onClick={() => setShowIosInstructions(false)}>
-          <div className="ios-inst-card" onClick={e => e.stopPropagation()}>
-            <div className="ios-inst-title">{t('install.iosTitle')}</div>
+        <Sheet title={t('install.iosTitle')} onClose={() => setShowIosInstructions(false)}>
             <ol className="ios-inst-steps">
               <li>
-                <span className="ios-inst-icon">⬆️</span>
                 <span dangerouslySetInnerHTML={{ __html: t('install.iosStep1') }} />
               </li>
               <li>
-                <span className="ios-inst-icon">➕</span>
                 <span dangerouslySetInnerHTML={{ __html: t('install.iosStep2') }} />
               </li>
               <li>
-                <span className="ios-inst-icon">✅</span>
                 <span dangerouslySetInnerHTML={{ __html: t('install.iosStep3') }} />
               </li>
             </ol>
             <button type="button" className="ios-inst-close" onClick={() => setShowIosInstructions(false)}>
               {t('install.iosOk')}
             </button>
-          </div>
-        </div>
+        </Sheet>
       )}
 
       {renderPlanEventSheet()}
       {renderPlanSearchSheet()}
       {renderPlanFiltersSheet()}
 
-      {/* Navigation Drawer */}
-      {screen !== 'login' && (
-        <div className={`app-drawer ${drawerOpen ? 'open' : ''}`} aria-hidden={!drawerOpen} aria-modal={drawerOpen}>
-          <button type="button" className="drawer-backdrop" onClick={() => setDrawerOpen(false)} aria-label={t('general.closeMenu')} />
-          <aside className="drawer-panel" role="navigation" aria-label={t('general.openMenu')}>
-            <div className="drawer-grabber" aria-hidden />
-            <div className="drawer-header">
-              <img src={LOGO_SRC} alt="ZUTnik" className="drawer-header-logo" />
-              <div className="drawer-header-info">
-                <div className="drawer-header-title">{t('nav.more')}</div>
-                <div className="drawer-header-user">ZUTnik PWA</div>
-              </div>
-              <button type="button" className="drawer-close" onClick={() => setDrawerOpen(false)} aria-label={t('general.closeMenu')}>
-                <Ic n="x" />
-              </button>
-            </div>
-
-            <div className="drawer-divider" />
-
-            <div className="drawer-list">
-              {moreDrawerItems.map(item => (
-                <button key={item.key} type="button" className={`drawer-item ${screen === item.key ? 'active' : ''}`} onClick={() => openScreen(item.key)}>
-                  <span className="drawer-item-icon"><Ic n={item.icon} /></span>
-                  {item.label}
-                </button>
-              ))}
-            </div>
-
-            <div className="drawer-footer">
-              <button type="button" className="drawer-logout" onClick={() => { if (window.confirm(t('logout.confirm'))) { applySession(null); setDrawerOpen(false); } }}>
-                <Ic n="logout" />
-                {t('logout.button')}
-              </button>
-            </div>
-          </aside>
+      {screen !== 'login' && drawerOpen && <Sheet title={t('nav.more')} onClose={() => setDrawerOpen(false)} className="more-sheet" bottomSlide headingAside={<span className="more-sheet-version">PWA</span>}>
+        <nav className="drawer-list" aria-label={t('nav.more')}>
+          {moreDrawerItems.filter((item) => item.key !== 'settings').map((item) => <button key={item.key} type="button" className={`drawer-item ${screen === item.key ? 'active' : ''}`} onClick={() => openScreen(item.key)}><span className="drawer-item-icon"><Ic n={item.icon} /></span><span className="drawer-item-label">{item.label}</span><Ic n="chevR" /></button>)}
+        </nav>
+        <div className="drawer-footer">
+          <button type="button" className={`drawer-item ${screen === 'settings' ? 'active' : ''}`} onClick={() => openScreen('settings')}><span className="drawer-item-icon"><Ic n="settings" /></span><span className="drawer-item-label">{t('drawer.settings')}</span><Ic n="chevR" /></button>
+          <button type="button" className="drawer-item drawer-logout" onClick={() => { if (window.confirm(t('logout.confirm'))) { applySession(null); setDrawerOpen(false); } }}><span className="drawer-item-icon"><Ic n="logout" /></span><span className="drawer-item-label">{t('logout.button')}</span></button>
         </div>
-      )}
+      </Sheet>}
+
     </div>
   );
 }

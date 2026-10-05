@@ -1,0 +1,122 @@
+import { test, expect } from '@playwright/test';
+import { activePlan, fixture, rows } from './fixtures';
+
+test('the incoming page accepts vertical wheel scrolling immediately after a swipe', async ({ page }) => {
+  await page.setViewportSize({ width: 1366, height: 768 });
+  const requests = await fixture(page); await page.goto('');
+  await page.getByRole('button', { name: 'Plan', exact: true }).click();
+  await expect(activePlan(page).locator('.timetable-event').first()).toBeVisible();
+  await expect(page.locator('.sync-indicator')).toHaveCount(0);
+  const count = requests.length;
+  const incoming = page.locator('.timetable-page').nth(2);
+  const key = await incoming.getAttribute('data-page-key');
+  const rect = (await page.locator('.timetable-viewport').boundingBox())!;
+  const x = rect.x + rect.width * .8; const y = rect.y + 260;
+  await page.mouse.move(x, y); await page.mouse.down();
+  await page.mouse.move(x - rect.width * .65, y, { steps: 12 });
+  await page.mouse.up();
+  await expect(activePlan(page)).toHaveAttribute('data-page-key', key!, { timeout: 250 });
+  await page.mouse.move(x, y); await page.mouse.wheel(0, 150);
+  await expect.poll(() => activePlan(page).locator('.timetable-scroll').evaluate((el) => el.scrollTop), { timeout: 500 }).toBeGreaterThan(100);
+  await expect(activePlan(page)).toHaveAttribute('data-page-key', key!);
+  expect(requests.length).toBe(count);
+});
+
+test('desktop pager follows the pointer with two real pages and preserves the incoming DOM and scroll', async ({ page }) => {
+  await page.setViewportSize({ width: 1366, height: 768 });
+  const requests = await fixture(page); await page.goto('');
+  await page.getByRole('button', { name: 'Plan', exact: true }).click();
+  await expect(activePlan(page).locator('.timetable-event').first()).toBeVisible();
+  await expect(page.locator('.sync-indicator')).toHaveCount(0);
+  const scroller = activePlan(page).locator('.timetable-scroll');
+  await scroller.evaluate((element) => { element.scrollTop = 160; });
+  const incoming = page.locator('.timetable-page').nth(2);
+  const incomingKey = await incoming.getAttribute('data-page-key');
+  const node = await incoming.locator('.timetable-event').first().elementHandle();
+  const range = await page.locator('.plan-appbar-range').textContent();
+  const requestCount = requests.length;
+  const rect = (await page.locator('.timetable-viewport').boundingBox())!;
+  const x = rect.x + rect.width * .75; const y = rect.y + 100;
+  await page.mouse.move(x, y); await page.mouse.down();
+  await page.mouse.move(x - rect.width * .55, y, { steps: 16 });
+  await expect.poll(() => activePlan(page).evaluate((element) => element.getBoundingClientRect().x)).toBeLessThan(rect.x - rect.width * .4);
+  const side = (await incoming.boundingBox())!;
+  expect(side.x).toBeGreaterThan(rect.x);
+  expect(side.x).toBeLessThan(rect.x + rect.width * .6);
+  await expect(page.locator('.plan-appbar-range')).toHaveText(range!);
+  expect(requests.length).toBe(requestCount);
+  await page.screenshot({ path: 'test-results/desktop-pager-drag.png' });
+  await page.mouse.up();
+  await expect(activePlan(page)).toHaveAttribute('data-page-key', incomingKey!);
+  await expect.poll(async () => Math.abs(await activePlan(page).evaluate((element) => element.getBoundingClientRect().x) - (rect.x + 1))).toBeLessThan(1);
+  await expect.poll(() => activePlan(page).locator('.timetable-scroll').evaluate((element) => element.scrollTop)).toBe(160);
+  expect(await node?.evaluate((element) => element.isConnected)).toBe(true);
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  await expect(page.locator('.sync-indicator')).toHaveCount(0);
+  expect(requests.length).toBe(requestCount);
+});
+
+test('a slow short drag returns to the same page without fetching or opening a class', async ({ page }) => {
+  await page.setViewportSize({ width: 393, height: 852 });
+  const requests = await fixture(page); await page.goto('');
+  await page.getByRole('button', { name: 'Plan', exact: true }).click();
+  await expect(activePlan(page).locator('.timetable-event').first()).toBeVisible();
+  await expect(page.locator('.sync-indicator')).toHaveCount(0);
+  const range = await page.locator('.plan-appbar-range').textContent(); const count = requests.length;
+  const rect = (await page.locator('.timetable-viewport').boundingBox())!;
+  await page.mouse.move(rect.x + 190, rect.y + 90); await page.mouse.down();
+  await page.mouse.move(rect.x + 155, rect.y + 90, { steps: 10 });
+  await page.waitForTimeout(200); await page.mouse.up();
+  await expect.poll(() => activePlan(page).evaluate((element) => Math.round(element.getBoundingClientRect().x))).toBe(Math.round(rect.x));
+  await expect(page.locator('.plan-appbar-range')).toHaveText(range!);
+  expect(requests.length).toBe(count);
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+});
+
+test('arrows, keyboard, month/day changes and reduced motion keep pager and dates aligned', async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: 'reduce' }); await page.setViewportSize({ width: 1366, height: 768 });
+  await fixture(page); await page.goto(''); await page.getByRole('button', { name: 'Plan', exact: true }).click();
+  await expect(activePlan(page).locator('.timetable-event').first()).toBeVisible();
+  const first = await activePlan(page).getAttribute('data-page-key');
+  const next = page.locator('.timetable-pager .icon-btn').last();
+  await next.click(); await expect(activePlan(page)).not.toHaveAttribute('data-page-key', first!);
+  const second = await activePlan(page).getAttribute('data-page-key');
+  await next.click(); await expect(activePlan(page)).not.toHaveAttribute('data-page-key', second!);
+  await page.locator('.timetable-viewport').focus(); await page.keyboard.press('ArrowLeft');
+  await expect(activePlan(page)).toHaveAttribute('data-page-key', second!);
+  await page.keyboard.press('ArrowLeft'); await expect(activePlan(page)).toHaveAttribute('data-page-key', first!);
+  await page.getByRole('tab', { name: 'Miesiąc' }).click(); await expect(activePlan(page).locator('.month-cell')).toHaveCount(42);
+  const month = await activePlan(page).getAttribute('data-page-key'); await next.click();
+  await expect(activePlan(page)).not.toHaveAttribute('data-page-key', month!);
+  await page.getByRole('tab', { name: 'Dzień', exact: true }).click(); await expect(activePlan(page).locator('.timetable-day')).toHaveCount(1);
+  await expect(page.locator('.timetable-page')).toHaveCount(3);
+  await expect(page.locator('.timetable-page[aria-hidden="true"][inert]')).toHaveCount(2);
+});
+
+test('background synchronization updates adjacent content without cancelling an ongoing drag', async ({ page, context }) => {
+  await page.setViewportSize({ width: 393, height: 852 }); await fixture(page);
+  let week = 0; let release: (() => void) | undefined;
+  const held = new Promise<void>((resolve) => { release = resolve; });
+  await context.route('**/timetable/week', async (route) => {
+    week++;
+    if (week === 2) await held;
+    const start = route.request().postDataJSON().start;
+    await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ data: rows(start) }) });
+  });
+  await page.goto(''); await page.getByRole('button', { name: 'Plan', exact: true }).click();
+  await expect(activePlan(page).locator('button.timetable-event').first()).toBeVisible();
+  await expect.poll(() => week).toBe(2);
+  const node = await activePlan(page).locator('button.timetable-event').first().elementHandle();
+  const rect = (await page.locator('.timetable-viewport').boundingBox())!;
+  await page.mouse.move(rect.x + 290, rect.y + 100); await page.mouse.down();
+  await page.mouse.move(rect.x + 80, rect.y + 100, { steps: 12 });
+  await expect.poll(() => activePlan(page).evaluate((element) => element.getBoundingClientRect().x)).toBeLessThan(-150);
+  release?.(); await expect(page.locator('.sync-indicator')).toHaveCount(0);
+  await expect(page.locator('.timetable-page').nth(2).locator('.timetable-event')).toHaveCount(5);
+  expect(await activePlan(page).evaluate((element) => element.getBoundingClientRect().x)).toBeLessThan(-150);
+  expect(await node?.evaluate((element) => element.isConnected)).toBe(true);
+  await page.screenshot({ path: 'test-results/mobile-pager-sync-drag.png' });
+  const incoming = await page.locator('.timetable-page').nth(2).getAttribute('data-page-key');
+  await page.mouse.up(); await expect(activePlan(page)).toHaveAttribute('data-page-key', incoming!);
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+});

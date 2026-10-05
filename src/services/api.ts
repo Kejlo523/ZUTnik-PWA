@@ -25,10 +25,32 @@ import {
   normalizePlanFilterKey,
   normalizePlanFilterString,
 } from '../planFilters';
-import { loadOrCreateDeviceId } from './storage';
+import { loadOrCreateDeviceId, loadSession } from './storage';
+import { cachedTimetableWindow, syncTimetableWindow, shiftDay, monday } from './timetable';
+import { readResource, saveResource } from './offlineStore';
 
 const API_BASE = import.meta.env.VITE_API_BASE ?? (import.meta.env.DEV ? '/api' : `${import.meta.env.BASE_URL}api`);
 const DEVICE_ID = loadOrCreateDeviceId();
+function normalizePlanHiddenSubjectKeys(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return [...new Set(
+    value
+      .filter((item): item is string => typeof item === 'string')
+      .map((item) => normalizePlanFilterKey(item))
+      .filter(Boolean),
+  )];
+}
+function findPeriodByYear(
+  periods: SessionPeriod[],
+  key: string,
+  year: number,
+  field: 'start' | 'end' = 'start',
+): SessionPeriod | null {
+  const matches = periods
+    .filter((period) => period.key === key && Number(period[field].slice(0, 4)) === year)
+    .sort((a, b) => a.start.localeCompare(b.start));
+  return matches[0] ?? null;
+}
 const SESSION_EXPIRED_MESSAGE = 'Sesja wygasła, zaloguj się ponownie';
 const USOS_LOGIN_SCOPES = 'studies|grades|payments|cards|photo|crstests|offline_access';
 
@@ -92,10 +114,9 @@ function ensureArray<T>(value: unknown): T[] {
 }
 
 function hasHttpAuthError(status: number, message: string): boolean {
-  if (status === 401 || status === 403) return true;
+  if (status === 401) return true;
   const normalized = message.toLowerCase();
   return normalized.includes('unauthorized')
-    || normalized.includes('forbidden')
     || normalized.includes('oauth_problem=token_rejected')
     || normalized.includes('token rejected');
 }
@@ -156,7 +177,11 @@ function createApiRequestInit(init: RequestInit = {}): RequestInit {
 }
 
 async function apiFetch(input: RequestInfo | URL, init: RequestInit = {}): Promise<Response> {
-  return fetch(input, createApiRequestInit(init));
+  if (!navigator.onLine) throw new Error('Tryb offline. Pokazuję zapisane dane.');
+  const controller = new AbortController();
+  const timer = window.setTimeout(() => controller.abort(), 25_000);
+  try { return await fetch(input, createApiRequestInit({ ...init, signal: init.signal ?? controller.signal })); }
+  finally { clearTimeout(timer); }
 }
 
 function fallbackStudy(session: SessionData): Study {
@@ -196,6 +221,7 @@ function hasUsosScope(session: SessionData, scope: string): boolean {
 }
 
 async function postUsosEndpoint<T>(usos: UsosSessionData, path: string, payload: Record<string, unknown> = {}): Promise<T> {
+  const owner = loadSession()?.usos?.accessToken;
   const response = await apiFetch(`${API_BASE}${path}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -208,6 +234,9 @@ async function postUsosEndpoint<T>(usos: UsosSessionData, path: string, payload:
   });
 
   const body = (await response.json().catch(() => ({}))) as { error?: string } & T;
+  if (owner && owner === usos.accessToken && loadSession()?.usos?.accessToken !== owner) {
+    throw new DOMException('Konto zmieniło się podczas pobierania.', 'AbortError');
+  }
   if (!response.ok) {
     const errorMessage = getFriendlyErrorMessage(body.error || `USOS API error: ${response.status}`);
     if (hasHttpAuthError(response.status, errorMessage)) {
@@ -304,30 +333,6 @@ function parseRssNews(xml: string): NewsItem[] {
       thumbUrl,
     };
   });
-}
-
-async function proxyPlanStudent(query: Record<string, string>): Promise<Record<string, unknown>[]> {
-  const url = new URL(`${API_BASE}/proxy/plan-student`, window.location.origin);
-  for (const [key, value] of Object.entries(query)) {
-    url.searchParams.set(key, value);
-  }
-
-  const response = await apiFetch(`${url.pathname}${url.search}`);
-  const body = (await response.json().catch(() => ({}))) as { data?: Record<string, unknown>[]; error?: string };
-  if (!response.ok) {
-    throw new Error(getFriendlyErrorMessage(body.error || `Plan proxy HTTP ${response.status}`));
-  }
-  return Array.isArray(body.data) ? body.data : [];
-}
-
-function normalizePlanHiddenSubjectKeys(value: unknown): string[] {
-  if (!Array.isArray(value)) return [];
-  return [...new Set(
-    value
-      .filter((item): item is string => typeof item === 'string')
-      .map((item) => normalizePlanFilterKey(item))
-      .filter(Boolean),
-  )];
 }
 
 export async function fetchPlanHiddenSubjects(album: string): Promise<string[]> {
@@ -630,34 +635,6 @@ function formatYmd(date: Date): string {
   return `${y}-${m}-${d}`;
 }
 
-function toOffsetIso(date: Date): string {
-  const y = date.getFullYear();
-  const m = String(date.getMonth() + 1).padStart(2, '0');
-  const d = String(date.getDate()).padStart(2, '0');
-  const hh = String(date.getHours()).padStart(2, '0');
-  const mm = String(date.getMinutes()).padStart(2, '0');
-  const ss = String(date.getSeconds()).padStart(2, '0');
-  const offset = -date.getTimezoneOffset();
-  const sign = offset >= 0 ? '+' : '-';
-  const abs = Math.abs(offset);
-  const oh = String(Math.floor(abs / 60)).padStart(2, '0');
-  const om = String(abs % 60).padStart(2, '0');
-  return `${y}-${m}-${d}T${hh}:${mm}:${ss}${sign}${oh}:${om}`;
-}
-
-function mapSearchCategory(category: string): string {
-  const key = String(category || '').toLowerCase();
-  if (key.includes('teacher') || key.includes('wyk')) return 'teacher';
-  if (key.includes('room') || key.includes('sal')) return 'room';
-  if (key.includes('group') || key.includes('grup')) return 'group';
-  if (key.includes('subject') || key.includes('przedm')) return 'subject';
-  return 'number';
-}
-
-function resolveSearchAlbum(category: string, query: string): string {
-  return mapSearchCategory(category) === 'number' ? firstNonEmpty(query) : '';
-}
-
 function resolveViewRange(viewMode: ViewMode, currentDateText: string): { current: Date; rangeStart: Date; rangeEnd: Date; prev: Date; next: Date } {
   const current = parseYmdOrToday(currentDateText);
   if (viewMode === 'day') {
@@ -688,28 +665,6 @@ function formatHeaderLabel(viewMode: ViewMode, current: Date, rangeStart: Date, 
   const left = new Intl.DateTimeFormat('pl-PL', { day: '2-digit', month: '2-digit' }).format(rangeStart);
   const right = new Intl.DateTimeFormat('pl-PL', { day: '2-digit', month: '2-digit', year: 'numeric' }).format(rangeEnd);
   return `${left} - ${right}`;
-}
-
-function parsePlanEventRow(row: Record<string, unknown>): Record<string, string> | null {
-  const start = firstNonEmpty(row.start);
-  const end = firstNonEmpty(row.end);
-  if (!start || !end) return null;
-  return {
-    title: firstNonEmpty(row.title),
-    description: firstNonEmpty(row.description),
-    start,
-    end,
-    workerTitle: firstNonEmpty(row.worker_title),
-    worker: firstNonEmpty(row.worker),
-    lessonForm: firstNonEmpty(row.lesson_form),
-    lessonFormShort: firstNonEmpty(row.lesson_form_short),
-    groupName: firstNonEmpty(row.group_name),
-    tokName: firstNonEmpty(row.tok_name),
-    room: firstNonEmpty(row.room),
-    lessonStatus: firstNonEmpty(row.lesson_status),
-    lessonStatusShort: firstNonEmpty(row.lesson_status_short),
-    subject: firstNonEmpty(row.subject),
-  };
 }
 
 function parseEventDate(value: string): Date | null {
@@ -948,39 +903,6 @@ function buildPlanSubjectFilters(dayColumns: PlanResult['dayColumns']): PlanResu
   return [...subjectFilterMap.values()].sort((a, b) => a.label.localeCompare(b.label, 'pl'));
 }
 
-function isRegularSubjectFilterEvent(event: Record<string, string>): boolean {
-  const subject = firstNonEmpty(event.subject, event.title);
-  if (!subject) return false;
-
-  const status = normalizePlanFilterString(event.lessonStatusShort);
-  return status !== 'e'
-    && status !== 'ez'
-    && status !== 'zal'
-    && status !== 'zalp'
-    && status !== 'zalzd'
-    && status !== 'zalzdp';
-}
-
-function resolvePlanAlbum(session: SessionData): string {
-  const directAlbum = firstNonEmpty(session.userId);
-  if (/^(s?\d{4,6})$/i.test(directAlbum)) {
-    return directAlbum;
-  }
-  throw new Error('Brak numeru albumu w danych USOS.');
-}
-
-function findPeriodByYear(
-  periods: SessionPeriod[],
-  key: string,
-  year: number,
-  field: 'start' | 'end' = 'start',
-): SessionPeriod | null {
-  const matches = periods
-    .filter((period) => period.key === key && Number(period[field].slice(0, 4)) === year)
-    .sort((a, b) => a.start.localeCompare(b.start));
-  return matches[0] ?? null;
-}
-
 function resolveSemesterRange(currentDateText: string, sessionPeriods: SessionPeriod[]): { current: Date; rangeStart: Date; rangeEnd: Date } {
   const current = parseYmdOrToday(currentDateText);
   const month = current.getMonth();
@@ -1039,47 +961,18 @@ function resolveSemesterRange(currentDateText: string, sessionPeriods: SessionPe
   };
 }
 
-function resolveCurrentAcademicTermRange(currentDateText: string): { current: Date; rangeStart: Date; rangeEnd: Date } {
-  const current = parseYmdOrToday(currentDateText);
-  const month = current.getMonth() + 1;
-
-  if (month >= 10) {
-    const yearStart = current.getFullYear();
-    const yearEnd = yearStart + 1;
-    return {
-      current,
-      rangeStart: startOfDay(new Date(yearStart, 9, 1)),
-      rangeEnd: startOfDay(new Date(yearEnd, 2, 0)),
-    };
-  }
-
-  if (month <= 2) {
-    const yearEnd = current.getFullYear();
-    const yearStart = yearEnd - 1;
-    return {
-      current,
-      rangeStart: startOfDay(new Date(yearStart, 9, 1)),
-      rangeEnd: startOfDay(new Date(yearEnd, 2, 0)),
-    };
-  }
-
-  const year = current.getFullYear();
-  return {
-    current,
-    rangeStart: startOfDay(new Date(year, 2, 1)),
-    rangeEnd: startOfDay(new Date(year, 8, 30)),
-  };
-}
-
 export async function fetchSessionPeriods(): Promise<SessionPeriod[]> {
+  const saved = await readResource<SessionPeriod[]>('academic-calendar');
+  if (saved && (Date.now() - saved.ts < 7 * 86_400_000 || !navigator.onLine)) return saved.data;
+  if (!navigator.onLine) return [];
   try {
     const response = await apiFetch(`${API_BASE}/proxy/calendar`);
-    if (!response.ok) return [];
-    const body = (await response.json()) as { periods?: SessionPeriod[] };
-    return Array.isArray(body.periods) ? body.periods : [];
-  } catch {
-    return [];
-  }
+    if (!response.ok) return saved?.data ?? [];
+    const body = await response.json() as { periods?: SessionPeriod[] };
+    if (!Array.isArray(body.periods)) return saved?.data ?? [];
+    await saveResource('academic-calendar', body.periods);
+    return body.periods;
+  } catch { return saved?.data ?? []; }
 }
 
 export interface PlanWindowData {
@@ -1090,6 +983,10 @@ export interface PlanWindowData {
   sessionPeriods: SessionPeriod[];
   entriesTotal: number;
   daysWithData: string[];
+  verifiedWeeks?: string[];
+  verifiedWeekTimes?: Record<string, number>;
+  completeRanges?: Array<{ start: string; end: string }>;
+  fetchedAt?: number;
 }
 
 export function buildPlanResultFromWindow(
@@ -1145,54 +1042,23 @@ export function buildPlanResultFromWindow(
 
 export async function fetchPlanWindow(
   session: SessionData,
-  payload: {
-    viewMode: ViewMode;
-    currentDate: string;
-    studyId: string | null;
-    search: { category: string; query: string };
-    prefetchDaysBefore?: number;
-    prefetchDaysAfter?: number;
-  },
+  payload: { viewMode: ViewMode; currentDate: string; studyId: string | null;
+    search: { category: string; query: string }; prefetchDaysBefore?: number;
+    prefetchDaysAfter?: number; force?: boolean; onUpdate?: (window: PlanWindowData) => void },
 ): Promise<PlanWindowData> {
+  if (!session.usos) throw new SessionExpiredError();
   const { rangeStart, rangeEnd } = resolveViewRange(payload.viewMode, payload.currentDate);
-  const fetchStart = addDays(rangeStart, -(Math.max(0, payload.prefetchDaysBefore ?? 0)));
-  const fetchEnd = addDays(rangeEnd, Math.max(0, payload.prefetchDaysAfter ?? 0));
-
-  let urlParams: Record<string, string>;
-  let album = '';
-
-  if (firstNonEmpty(payload.search.query)) {
-    album = resolveSearchAlbum(payload.search.category, payload.search.query);
-    urlParams = {
-      [mapSearchCategory(payload.search.category || 'number')]: firstNonEmpty(payload.search.query),
-      start: toOffsetIso(new Date(fetchStart.getFullYear(), fetchStart.getMonth(), fetchStart.getDate(), 0, 0, 0)),
-      end: toOffsetIso(new Date(fetchEnd.getFullYear(), fetchEnd.getMonth(), fetchEnd.getDate(), 23, 59, 59)),
-    };
-  } else {
-    album = resolvePlanAlbum(session);
-    urlParams = {
-      number: album,
-      start: toOffsetIso(new Date(fetchStart.getFullYear(), fetchStart.getMonth(), fetchStart.getDate(), 0, 0, 0)),
-      end: toOffsetIso(new Date(fetchEnd.getFullYear(), fetchEnd.getMonth(), fetchEnd.getDate(), 23, 59, 59)),
-    };
-  }
-
-  const [rawEvents, sessionPeriods] = await Promise.all([
-    proxyPlanStudent(urlParams),
-    fetchSessionPeriods(),
-  ]);
-  const events = rawEvents.map(parsePlanEventRow).filter((event): event is Record<string, string> => Boolean(event));
-  const grouped = groupPlanEventsByDay(events);
-
-  return {
-    rangeStart: formatYmd(fetchStart),
-    rangeEnd: formatYmd(fetchEnd),
-    album,
-    events,
-    sessionPeriods,
-    entriesTotal: events.length,
-    daysWithData: [...grouped.keys()].sort(),
-  };
+  const savedCalendar = await readResource<SessionPeriod[]>('academic-calendar');
+  const periods = savedCalendar?.data ?? [];
+  const visibleEnd = formatYmd(rangeEnd);
+  const result = await syncTimetableWindow(session, payload.search, formatYmd(rangeStart),
+    payload.viewMode === 'month' ? visibleEnd : shiftDay(monday(visibleEnd), 13),
+    (path, body) => postUsosEndpoint(session.usos!, path, body),
+    { periods, force: payload.force, onUpdate: payload.onUpdate, bulk: !payload.search.query });
+  // Calendar scraping must never block the first visible week.
+  result.sessionPeriods = await fetchSessionPeriods();
+  payload.onUpdate?.(result);
+  return result;
 }
 
 export async function fetchPlan(
@@ -1210,92 +1076,41 @@ export async function fetchPlanSemesterExport(
   session: SessionData,
   payload: { currentDate: string; studyId: string | null; search: { category: string; query: string } },
 ): Promise<PlanResult> {
-  const sessionPeriods = await fetchSessionPeriods();
-  const { current, rangeStart, rangeEnd } = resolveSemesterRange(payload.currentDate, sessionPeriods);
-
-  let album = '';
-  let urlParams: Record<string, string>;
-
-  if (firstNonEmpty(payload.search.query)) {
-    album = resolveSearchAlbum(payload.search.category, payload.search.query);
-    urlParams = {
-      [mapSearchCategory(payload.search.category || 'number')]: firstNonEmpty(payload.search.query),
-      start: toOffsetIso(new Date(rangeStart.getFullYear(), rangeStart.getMonth(), rangeStart.getDate(), 0, 0, 0)),
-      end: toOffsetIso(new Date(rangeEnd.getFullYear(), rangeEnd.getMonth(), rangeEnd.getDate(), 23, 59, 59)),
-    };
-  } else {
-    album = resolvePlanAlbum(session);
-    urlParams = {
-      number: album,
-      start: toOffsetIso(new Date(rangeStart.getFullYear(), rangeStart.getMonth(), rangeStart.getDate(), 0, 0, 0)),
-      end: toOffsetIso(new Date(rangeEnd.getFullYear(), rangeEnd.getMonth(), rangeEnd.getDate(), 23, 59, 59)),
-    };
-  }
-
-  const rawEvents = await proxyPlanStudent(urlParams);
-  const events = rawEvents.map(parsePlanEventRow).filter((event): event is Record<string, string> => Boolean(event));
-  const grouped = groupPlanEventsByDay(events);
+  const window = await fetchPlanWindow(session, { ...payload, viewMode: 'week' });
+  const current = parseYmdOrToday(payload.currentDate);
+  const complete = window.completeRanges?.find((range) => range.start <= payload.currentDate && range.end >= payload.currentDate);
+  const { rangeStart, rangeEnd } = complete ? { rangeStart: parseYmdOrToday(complete.start), rangeEnd: parseYmdOrToday(complete.end) } : resolveSemesterRange(payload.currentDate, window.sessionPeriods);
+  const grouped = groupPlanEventsByDay(window.events);
   const { dayColumns, hasAnyEventsInRange } = buildPlanDayColumns(grouped, rangeStart, rangeEnd);
-
-  return {
-    viewMode: 'month',
-    currentDate: formatYmd(current),
-    rangeStart: formatYmd(rangeStart),
-    rangeEnd: formatYmd(rangeEnd),
-    dayColumns,
-    hasAnyEventsInRange,
-    monthGrid: [],
-    subjectFilters: buildPlanSubjectFilters(dayColumns),
-    prevDate: formatYmd(addDays(current, -1)),
-    nextDate: formatYmd(addDays(current, 1)),
-    todayDate: formatYmd(startOfDay(new Date())),
-    headerLabel: 'Semestr',
-    sessionPeriods,
-    debug: {
-      album,
-      entriesTotal: events.length,
-      daysWithData: [...grouped.keys()].sort(),
-    },
-  };
+  if (!window.completeRanges?.some((range) => range.start <= formatYmd(rangeStart) && range.end >= formatYmd(rangeEnd))) {
+    throw new Error('Semestr nie jest jeszcze w całości zapisany. Zakończ synchronizację planu i ponów eksport.');
+  }
+  return { viewMode: 'month', currentDate: formatYmd(current), rangeStart: formatYmd(rangeStart),
+    rangeEnd: formatYmd(rangeEnd), dayColumns, hasAnyEventsInRange, monthGrid: [],
+    subjectFilters: buildPlanSubjectFilters(dayColumns), prevDate: formatYmd(addDays(current, -1)),
+    nextDate: formatYmd(addDays(current, 1)), todayDate: formatYmd(startOfDay(new Date())),
+    headerLabel: 'Semestr', sessionPeriods: window.sessionPeriods,
+    debug: { album: session.userId, entriesTotal: window.events.length, daysWithData: window.daysWithData } };
 }
 
 export async function fetchCurrentPlanSubjectFilters(
   session: SessionData,
   payload: { currentDate: string; studyId: string | null },
-): Promise<{
-  album: string;
-  subjectFilters: PlanResult['subjectFilters'];
-  rangeStart: string;
-  rangeEnd: string;
-  entriesTotal: number;
-}> {
-  void payload.studyId;
-  const { rangeStart, rangeEnd } = resolveCurrentAcademicTermRange(payload.currentDate);
-  const album = resolvePlanAlbum(session);
-  const urlParams = {
-    number: album,
-    start: toOffsetIso(new Date(rangeStart.getFullYear(), rangeStart.getMonth(), rangeStart.getDate(), 0, 0, 0)),
-    end: toOffsetIso(new Date(rangeEnd.getFullYear(), rangeEnd.getMonth(), rangeEnd.getDate(), 23, 59, 59)),
-  };
-
-  const rawEvents = await proxyPlanStudent(urlParams);
-  const events = rawEvents.map(parsePlanEventRow).filter((event): event is Record<string, string> => Boolean(event));
-  const regularEvents = events.filter(isRegularSubjectFilterEvent);
-  const grouped = groupPlanEventsByDay(regularEvents);
-  const { dayColumns } = buildPlanDayColumns(grouped, rangeStart, rangeEnd);
-
-  return {
-    album,
-    subjectFilters: buildPlanSubjectFilters(dayColumns),
-    rangeStart: formatYmd(rangeStart),
-    rangeEnd: formatYmd(rangeEnd),
-    entriesTotal: regularEvents.length,
-  };
+): Promise<{ album: string; subjectFilters: PlanResult['subjectFilters']; rangeStart: string; rangeEnd: string; entriesTotal: number }> {
+  const window = await cachedTimetableWindow(session, { category: 'album', query: '' });
+  if (!window) return { album: session.userId, subjectFilters: [], rangeStart: '', rangeEnd: '', entriesTotal: 0 };
+  const { rangeStart, rangeEnd } = resolveViewRange('month', payload.currentDate);
+  const { dayColumns } = buildPlanDayColumns(groupPlanEventsByDay(window.events), rangeStart, rangeEnd);
+  return { album: session.userId, subjectFilters: buildPlanSubjectFilters(dayColumns), rangeStart: window.rangeStart, rangeEnd: window.rangeEnd, entriesTotal: window.entriesTotal };
 }
 
-export async function fetchPlanSuggestions(kind: string, query: string): Promise<string[]> {
-  const response = await apiFetch(`${API_BASE}/proxy/plan-suggest?kind=${encodeURIComponent(kind)}&query=${encodeURIComponent(query)}`);
-  const body = (await response.json().catch(() => ({}))) as { data?: Array<{ item: string }> };
-  const rows = ensureArray<{ item: string }>(body.data);
-  return rows.map((row) => firstNonEmpty(row.item)).filter(Boolean);
+export async function fetchPlanSuggestions(session: SessionData, kind: string, query: string): Promise<string[]> {
+  if (!session.usos || query.trim().length < 2) return [];
+  const cacheKey = `suggest:${session.userId}:${kind}:${query.toLowerCase().trim()}`;
+  const saved = await readResource<string[]>(cacheKey);
+  if (saved && (Date.now() - saved.ts < 7 * 86_400_000 || !navigator.onLine)) return saved.data;
+  if (!navigator.onLine) return [];
+  const result = await postUsosEndpoint<{ data: string[] }>(session.usos, '/usos/timetable/suggest', { category: kind, query });
+  await saveResource(cacheKey, result.data);
+  return result.data;
 }

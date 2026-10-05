@@ -13,8 +13,8 @@ interface AppNavigationProps {
 const PRIMARY_ITEMS = [
   { key: 'home' as const, icon: 'home', labelKey: 'nav.home' },
   { key: 'plan' as const, icon: 'calendar', labelKey: 'nav.plan' },
-  { key: 'info' as const, icon: 'user', labelKey: 'nav.info' },
-  { key: 'grades' as const, icon: 'grade', labelKey: 'nav.grades' },
+  { key: 'info' as const, icon: 'grade', labelKey: 'nav.info' },
+  { key: 'grades' as const, icon: 'star', labelKey: 'nav.grades' },
 ];
 
 export function AppNavigation({ screen, t, openScreen, moreOpen, onMore }: AppNavigationProps) {
@@ -47,7 +47,7 @@ export function AppNavigation({ screen, t, openScreen, moreOpen, onMore }: AppNa
         aria-current={!primaryActive && !moreOpen ? 'page' : undefined}
         title={t('nav.more')}
       >
-        <span className="primary-navigation-icon"><Ic n="more" /></span>
+        <span className="primary-navigation-icon"><Ic n="more-horizontal" /></span>
         <span className="primary-navigation-label">{t('nav.more')}</span>
       </button>
     </nav>

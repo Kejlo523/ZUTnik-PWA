@@ -1,429 +1,86 @@
-import { useEffect, useRef, useState, type Dispatch, type MutableRefObject, type SetStateAction } from 'react';
-import { createPortal } from 'react-dom';
-
+import { useEffect, useState, type Dispatch, type MutableRefObject, type SetStateAction } from 'react';
 import type { PlanSubjectFilter } from '../../types';
 import type { SelectedPlanEvent, TranslateFn } from '../viewTypes';
 import { fmtDateLabel, toPlanTeacherSearchQuery } from '../helpers';
-import { MOTION_MS } from '../../motion';
-import { useOverscrollLock } from '../../hooks/useOverscrollLock';
-import { Ic } from '../ui';
-
-const PLAN_EVENT_SHEET_TRANSITION_MS = MOTION_MS.panel;
+import { Sheet } from '../components/Sheet';
+import { Ic, LoadingIndicator } from '../ui';
 
 interface PlanEventSheetProps {
-  selectedPlanEvent: SelectedPlanEvent | null;
-  onClose: () => void;
-  language: 'pl' | 'en';
+  selectedPlanEvent: SelectedPlanEvent | null; onClose: () => void; language: 'pl' | 'en';
   onQuickSearch: (category: string, query: string) => void;
 }
-
 export function PlanEventSheet({ selectedPlanEvent, onClose, language, onQuickSearch }: PlanEventSheetProps) {
-  const [renderedPlanEvent, setRenderedPlanEvent] = useState<SelectedPlanEvent | null>(null);
-  const [isOpen, setIsOpen] = useState(false);
-  const closeTimerRef = useRef<number | null>(null);
-  const stateFrameRef = useRef<number | null>(null);
-  const enterFrameRef = useRef<number | null>(null);
-  const enterFrameNestedRef = useRef<number | null>(null);
-  const shouldAnimateOpenRef = useRef(false);
-
-  const clearStateFrame = () => {
-    if (stateFrameRef.current !== null) {
-      window.cancelAnimationFrame(stateFrameRef.current);
-      stateFrameRef.current = null;
-    }
-  };
-
-  const clearEnterFrames = () => {
-    if (enterFrameRef.current !== null) {
-      window.cancelAnimationFrame(enterFrameRef.current);
-      enterFrameRef.current = null;
-    }
-    if (enterFrameNestedRef.current !== null) {
-      window.cancelAnimationFrame(enterFrameNestedRef.current);
-      enterFrameNestedRef.current = null;
-    }
-  };
-
-  useEffect(() => {
-    return () => {
-      if (closeTimerRef.current !== null) {
-        window.clearTimeout(closeTimerRef.current);
-      }
-      clearStateFrame();
-      clearEnterFrames();
-    };
-  }, []);
-
-  useEffect(() => {
-    clearStateFrame();
-
-    if (selectedPlanEvent) {
-      if (closeTimerRef.current !== null) {
-        window.clearTimeout(closeTimerRef.current);
-        closeTimerRef.current = null;
-      }
-
-      clearEnterFrames();
-      shouldAnimateOpenRef.current = !renderedPlanEvent || !isOpen;
-      stateFrameRef.current = window.requestAnimationFrame(() => {
-        if (shouldAnimateOpenRef.current) {
-          setIsOpen(false);
-        }
-        setRenderedPlanEvent(selectedPlanEvent);
-        stateFrameRef.current = null;
-      });
-      return;
-    }
-
-    if (!renderedPlanEvent) return;
-
-    clearEnterFrames();
-    shouldAnimateOpenRef.current = false;
-    stateFrameRef.current = window.requestAnimationFrame(() => {
-      setIsOpen(false);
-      closeTimerRef.current = window.setTimeout(() => {
-        setRenderedPlanEvent(null);
-        closeTimerRef.current = null;
-      }, PLAN_EVENT_SHEET_TRANSITION_MS);
-      stateFrameRef.current = null;
-    });
-  }, [isOpen, renderedPlanEvent, selectedPlanEvent]);
-
-  useEffect(() => {
-    if (!renderedPlanEvent || !shouldAnimateOpenRef.current) return;
-
-    shouldAnimateOpenRef.current = false;
-    enterFrameRef.current = window.requestAnimationFrame(() => {
-      enterFrameNestedRef.current = window.requestAnimationFrame(() => {
-        setIsOpen(true);
-        enterFrameRef.current = null;
-        enterFrameNestedRef.current = null;
-      });
-    });
-  }, [renderedPlanEvent]);
-
-  useOverscrollLock(isOpen && !!renderedPlanEvent);
-
-  if (!renderedPlanEvent) return null;
-
-  const { date, event } = renderedPlanEvent;
-  const room = event.room && event.room !== '-' ? event.room : '';
-  const group = event.group && event.group !== '-' ? event.group : '';
-  const teacherSearchQuery = toPlanTeacherSearchQuery(event.teacher);
-
-  const renderSearchRow = (
-    icon: string,
-    label: string,
-    value: string,
-    category: string,
-    query: string,
-  ) => {
-    if (!value) return null;
-    const trimmedQuery = query.trim();
-    const isSearchable = !!trimmedQuery;
-
-    return (
-      <div className="event-sheet-row">
-        <Ic n={icon} />
-        <div className="event-sheet-row-copy">
-          <span className="event-sheet-row-label">{label}</span>
-          {isSearchable ? (
-            <button
-              type="button"
-              className="event-sheet-link"
-              onClick={() => onQuickSearch(category, trimmedQuery)}
-            >
-              <span className="event-sheet-link-text">{value}</span>
-              <span className="event-sheet-link-icon" aria-hidden>
-                <Ic n="search" />
-              </span>
-            </button>
-          ) : (
-            <span className="event-sheet-row-value">{value}</span>
-          )}
-        </div>
+  if (!selectedPlanEvent) return null;
+  const { date, event } = selectedPlanEvent;
+  const rows = [
+    { icon: 'location', label: 'Sala', value: event.room, category: 'room', query: event.room },
+    { icon: 'group', label: 'Grupa', value: event.group, category: 'group', query: event.group },
+    { icon: 'user', label: 'Prowadzący', value: event.teacher, category: 'teacher', query: toPlanTeacherSearchQuery(event.teacher) },
+  ];
+  return <Sheet title={event.title} onClose={onClose} className="plan-event-sheet">
+    <span className={`event-sheet-type-badge ev-${event.typeClass}`}>{event.typeLabel || 'Zajęcia'}</span>
+    <div className="event-sheet-row"><Ic n="clock" /><span>{fmtDateLabel(date, language)} · {event.startStr}–{event.endStr}</span></div>
+    {rows.filter((row) => row.value && row.value !== '-').map((row) => <div className="event-sheet-row" key={row.label}>
+      <Ic n={row.icon} /><div className="event-sheet-row-copy"><span className="event-sheet-row-label">{row.label}</span>
+        <button className="event-sheet-link" onClick={() => onQuickSearch(row.category, row.query)}><span className="event-sheet-link-text">{row.value}</span><Ic n="search" /></button>
       </div>
-    );
-  };
-
-  return createPortal(
-    <div className={`event-sheet-overlay plan-event-sheet-overlay${isOpen ? ' is-open' : ''}`} onClick={onClose}>
-      <div className="event-sheet plan-event-sheet" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-label="Szczegóły zajęć">
-        <div className="event-sheet-handle" />
-        <div className={`event-sheet-type-badge ev-${event.typeClass}`}>{event.typeLabel || 'Zajęcia'}</div>
-        <div className="event-sheet-title">{event.title}</div>
-        <div className="event-sheet-row">
-          <Ic n="clock" />
-          <span>{fmtDateLabel(date, language)} · {event.startStr} - {event.endStr}</span>
-        </div>
-        {renderSearchRow('location', 'Sala', room, 'room', room)}
-        {renderSearchRow('group', 'Grupa', group, 'group', group)}
-        {renderSearchRow('user', 'Prowadzący', event.teacher, 'teacher', teacherSearchQuery)}
-        <button type="button" className="event-sheet-close" onClick={onClose}>
-          Zamknij
-        </button>
-      </div>
-    </div>,
-    document.body,
-  );
+    </div>)}
+  </Sheet>;
 }
 
 interface PlanSearchSheetProps {
-  planSearchOpen: boolean;
-  planSearchCat: string;
-  setPlanSearchCat: Dispatch<SetStateAction<string>>;
-  planSearchQ: string;
-  setPlanSearchQ: Dispatch<SetStateAction<string>>;
-  planSearchSuggestions: string[];
-  setPlanSearchSuggestions: Dispatch<SetStateAction<string[]>>;
-  planSearchLoading: boolean;
-  planSearchDebounceRef: MutableRefObject<ReturnType<typeof setTimeout> | null>;
+  initialSearch?: { category: string; query: string };
+  planSearchOpen: boolean; planSearchCat: string; setPlanSearchCat: Dispatch<SetStateAction<string>>;
+  planSearchQ: string; setPlanSearchQ: Dispatch<SetStateAction<string>>;
+  planSearchSuggestions: string[]; setPlanSearchSuggestions: Dispatch<SetStateAction<string[]>>;
+  planSearchLoading: boolean; planSearchDebounceRef: MutableRefObject<ReturnType<typeof setTimeout> | null>;
   fetchPlanSearchSuggestions: (kind: string, query: string) => Promise<void>;
   loadPlanData: (search?: { category: string; query: string }, forceRefresh?: boolean, newDate?: string) => Promise<void>;
-  setPlanSearchOpen: Dispatch<SetStateAction<boolean>>;
-  t: TranslateFn;
+  setPlanSearchOpen: Dispatch<SetStateAction<boolean>>; t: TranslateFn;
 }
-
-export function PlanSearchSheet({
-  planSearchOpen,
-  planSearchCat,
-  setPlanSearchCat,
-  planSearchQ,
-  setPlanSearchQ,
-  planSearchSuggestions,
-  setPlanSearchSuggestions,
-  planSearchLoading,
-  planSearchDebounceRef,
-  fetchPlanSearchSuggestions,
-  loadPlanData,
-  setPlanSearchOpen,
-  t,
-}: PlanSearchSheetProps) {
-  useOverscrollLock(planSearchOpen);
-
+export function PlanSearchSheet(props: PlanSearchSheetProps) {
+  const { planSearchOpen, planSearchCat, planSearchQ, planSearchSuggestions, planSearchLoading, planSearchDebounceRef, fetchPlanSearchSuggestions, t } = props;
+  const [query, setQuery] = useState(props.initialSearch?.query ?? planSearchQ);
+  const [category, setCategory] = useState(props.initialSearch?.category ?? planSearchCat);
+  useEffect(() => {
+    return () => { if (planSearchDebounceRef.current) clearTimeout(planSearchDebounceRef.current); };
+  }, [planSearchDebounceRef]);
   if (!planSearchOpen) return null;
-
-  const handleQueryChange = (value: string) => {
-    setPlanSearchQ(value);
-
-    if (planSearchDebounceRef.current) {
-      clearTimeout(planSearchDebounceRef.current);
-    }
-
-    if (planSearchCat === 'album') {
-      setPlanSearchSuggestions([]);
-      return;
-    }
-
-    planSearchDebounceRef.current = setTimeout(() => {
-      if (value.trim()) {
-        void fetchPlanSearchSuggestions(planSearchCat, value.trim());
-      } else {
-        setPlanSearchSuggestions([]);
-      }
-    }, 300);
+  const canSubmit = category === 'album' ? /^s?\d+$/i.test(query.trim())
+    : category === 'group' ? /\[\d+:\d+\]$/.test(query.trim()) : /\[[^\s[\]]+\]$/.test(query.trim());
+  const suggest = (value: string, kind = category) => {
+    setQuery(value); props.setPlanSearchSuggestions([]);
+    if (planSearchDebounceRef.current) clearTimeout(planSearchDebounceRef.current);
+    if (kind !== 'album' && value.trim().length >= 2) planSearchDebounceRef.current = setTimeout(() => void fetchPlanSearchSuggestions(kind, value.trim()), 650);
   };
-
-  const handleCategoryChange = (newCat: string) => {
-    setPlanSearchCat(newCat);
-    setPlanSearchSuggestions([]);
-    if (planSearchQ.trim() && newCat !== 'album') {
-      if (planSearchDebounceRef.current) {
-        clearTimeout(planSearchDebounceRef.current);
-      }
-      planSearchDebounceRef.current = setTimeout(() => {
-        void fetchPlanSearchSuggestions(newCat, planSearchQ.trim());
-      }, 300);
-    }
+  const submit = () => {
+    if (!canSubmit) return;
+    props.setPlanSearchCat(category); props.setPlanSearchQ(query.trim());
+    props.setPlanSearchOpen(false); props.setPlanSearchSuggestions([]);
+    void props.loadPlanData({ category, query: query.trim() });
   };
-
-  const handleSuggestionClick = (suggestion: string) => {
-    setPlanSearchQ(suggestion);
-    setPlanSearchSuggestions([]);
-  };
-
-  const handleSearch = () => {
-    if (planSearchQ.trim()) {
-      void loadPlanData({ category: planSearchCat, query: planSearchQ.trim() });
-      setPlanSearchOpen(false);
-    }
-  };
-
-  const handleClear = () => {
-    setPlanSearchQ('');
-    setPlanSearchSuggestions([]);
-    void loadPlanData();
-    setPlanSearchOpen(false);
-  };
-
-  return (
-    <div className="event-sheet-overlay" onClick={() => setPlanSearchOpen(false)}>
-      <div className="event-sheet search-sheet" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-label="Szukaj w planie">
-        <div className="event-sheet-handle" />
-        <div className="search-container">
-          <h2 className="search-title">Szukaj w planie</h2>
-
-          <div className="search-field-group">
-            <label className="search-label">{t('search.category')}</label>
-            <select
-              value={planSearchCat}
-              onChange={(e) => handleCategoryChange(e.target.value)}
-              className="search-select"
-            >
-              <option value="album">{t('search.catAlbum')}</option>
-              <option value="teacher">{t('search.catTeacher')}</option>
-              <option value="group">{t('search.catGroup')}</option>
-              <option value="room">{t('search.catRoom')}</option>
-              <option value="subject">{t('search.catSubject')}</option>
-            </select>
-          </div>
-
-          <div className="search-field-group">
-            <label className="search-label">{t('search.queryLabel')}</label>
-            <div className="search-input-wrapper">
-              <input
-                type="text"
-                value={planSearchQ}
-                onChange={(e) => handleQueryChange(e.target.value)}
-                placeholder={t('search.queryPlaceholder')}
-                className="search-input"
-                onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
-              />
-              {planSearchLoading && <span className="search-spinner-inline" />}
-            </div>
-          </div>
-
-          {(planSearchSuggestions.length > 0 || (!planSearchQ.trim() && planSearchCat !== 'album')) && (
-            <div className="search-suggestions-container">
-              {planSearchSuggestions.length > 0 ? (
-                planSearchSuggestions.map((suggestion, idx) => (
-                  <button
-                    key={idx}
-                    type="button"
-                    className="search-suggestion-item"
-                    onClick={() => handleSuggestionClick(suggestion)}
-                  >
-                    {suggestion}
-                  </button>
-                ))
-              ) : planSearchCat !== 'album' && !planSearchQ.trim() ? (
-                <div className="search-placeholder">{t('search.placeholderSearch')}</div>
-              ) : null}
-            </div>
-          )}
-
-          <div className="search-actions">
-            <button
-              type="button"
-              className="search-btn-primary"
-              onClick={handleSearch}
-              disabled={!planSearchQ.trim()}
-            >
-              Szukaj
-            </button>
-            <button
-              type="button"
-              className="search-btn-secondary"
-              onClick={handleClear}
-            >
-              Wyczyść
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
+  return <Sheet title="Szukaj w planie" onClose={() => props.setPlanSearchOpen(false)}>
+    <label className="field-label">{t('search.category')}<select value={category} onChange={(event) => { setCategory(event.target.value); suggest(query, event.target.value); }}>
+      <option value="album">{t('search.catAlbum')}</option><option value="teacher">{t('search.catTeacher')}</option><option value="group">{t('search.catGroup')}</option><option value="room">{t('search.catRoom')}</option><option value="subject">{t('search.catSubject')}</option>
+    </select></label>
+    <label className="field-label">{t('search.queryLabel')}<div className="search-input-wrapper"><input autoFocus value={query} onChange={(event) => suggest(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') submit(); }} placeholder={t('search.queryPlaceholder')} />{planSearchLoading && <LoadingIndicator className="search-spinner-inline" />}</div></label>
+    <div className="search-suggestions-container" aria-live="polite">{planSearchSuggestions.map((value) => <button className="search-suggestion-item" key={value} onClick={() => { if (value.trimEnd().endsWith('/')) suggest(value); else { setQuery(value); props.setPlanSearchSuggestions([]); } }}>{value}</button>)}</div>
+    <div className="search-actions"><button className="text-btn" onClick={() => { props.setPlanSearchQ(''); props.setPlanSearchCat('album'); props.setPlanSearchOpen(false); void props.loadPlanData({ category: 'album', query: '' }); }}>Mój plan</button><button className="primary-btn" onClick={submit} disabled={!canSubmit}><Ic n="search" />Szukaj</button></div>
+  </Sheet>;
 }
 
 interface PlanFiltersSheetProps {
-  open: boolean;
-  options: PlanSubjectFilter[];
-  hiddenKeys: string[];
-  onToggle: (key: string) => void;
-  onReset: () => void;
-  onClose: () => void;
+  open: boolean; options: PlanSubjectFilter[]; hiddenKeys: string[]; onToggle: (key: string) => void; onReset: () => void; onClose: () => void;
 }
-
-export function PlanFiltersSheet({
-  open,
-  options,
-  hiddenKeys,
-  onToggle,
-  onReset,
-  onClose,
-}: PlanFiltersSheetProps) {
-  useOverscrollLock(open);
-
+export function PlanFiltersSheet({ open, options, hiddenKeys, onToggle, onReset, onClose }: PlanFiltersSheetProps) {
   if (!open) return null;
-
-  const excludedCount = hiddenKeys.length;
-
-  return (
-    <div className="event-sheet-overlay" onClick={onClose}>
-      <div className="event-sheet search-sheet" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-label="Wyklucz przedmioty">
-        <div className="event-sheet-handle" />
-        <div className="search-container">
-          <h2 className="search-title">Wyklucz przedmioty</h2>
-
-          <div className="plan-filter-intro">
-            <span className="plan-filter-intro-badge">
-              {excludedCount > 0 ? `Wykluczono: ${excludedCount}` : 'Bez wykluczeń'}
-            </span>
-            <p className="plan-filter-intro-text">
-              Dotknij przedmiotu, aby ukryć go w planie. Ponowne dotknięcie przywraca go do widoku.
-            </p>
-          </div>
-
-          {options.length === 0 ? (
-            <div className="search-placeholder">Brak dostępnych przedmiotów w aktualnym zakresie.</div>
-          ) : (
-            <div className="plan-filter-list">
-              {options.map((option) => {
-                const excluded = hiddenKeys.includes(option.key);
-                return (
-                  <button
-                    key={option.key}
-                    type="button"
-                    className={`plan-filter-item${excluded ? ' is-excluded' : ''}`}
-                    onClick={() => onToggle(option.key)}
-                  >
-                    <span className="plan-filter-copy">
-                      <span className="plan-filter-label">{option.label}</span>
-                      <span className="plan-filter-hint">
-                        {excluded ? 'Dotknij, aby przywrócić do planu' : 'Dotknij, aby wykluczyć z planu'}
-                      </span>
-                    </span>
-                    <span className="plan-filter-meta">
-                      <span className="plan-filter-count">{option.count}</span>
-                      <span className={`plan-filter-state${excluded ? ' is-excluded' : ''}`}>
-                        {excluded ? 'Wykluczony' : 'Widoczny'}
-                      </span>
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
-          )}
-
-          <div className="search-actions">
-            <button
-              type="button"
-              className="search-btn-secondary"
-              onClick={onReset}
-              disabled={hiddenKeys.length === 0}
-            >
-              Pokaż wszystko
-            </button>
-            <button
-              type="button"
-              className="search-btn-primary"
-              onClick={onClose}
-            >
-              Gotowe
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
+  return <Sheet title="Filtr przedmiotów" onClose={onClose}>
+    {!options.length ? <div className="empty-state">Brak przedmiotów w zapisanym planie.</div> : <div className="plan-filter-list">
+      {options.map((option) => <label className="plan-filter-item" key={option.key}>
+        <span className="plan-filter-copy"><span className="plan-filter-label">{option.label}</span><small>{option.count} zajęć</small></span>
+        <input type="checkbox" checked={!hiddenKeys.includes(option.key)} onChange={() => onToggle(option.key)} />
+      </label>)}
+    </div>}
+    <div className="search-actions"><button className="text-btn" onClick={onReset} disabled={!hiddenKeys.length}>Pokaż wszystkie</button><button className="primary-btn" onClick={onClose}>Gotowe</button></div>
+  </Sheet>;
 }

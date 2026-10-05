@@ -5,11 +5,6 @@
   box-sizing: border-box;
 }
 
-html {
-  /* Top inset belongs to the viewport; bottom/side insets are handled by app controls. */
-  padding: env(safe-area-inset-top) 0 0;
-}
-
 html,
 body,
 #root {

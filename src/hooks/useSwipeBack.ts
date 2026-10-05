@@ -41,7 +41,7 @@ export function useSwipeGestures({ canGoBack, onBack, canOpenDrawer, onOpenDrawe
 
   const onTouchStart = useCallback((e: React.TouchEvent<HTMLElement>) => {
     if (e.touches.length !== 1) return;
-    if (isOverscrollLocked()) {
+    if (isOverscrollLocked() || (e.target instanceof Element && e.target.closest('.timetable-viewport'))) {
       blocked.current = true;
       return;
     }

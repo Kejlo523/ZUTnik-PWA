@@ -2,6 +2,7 @@ import dotenv from 'dotenv';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import crypto from 'node:crypto';
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -14,6 +15,7 @@ import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
 import { createStatsService } from './stats/service.mjs';
 import { createTimetableGateway } from './usos/timetable.mjs';
+import { createUsosReadCache } from './usos/read-cache.mjs';
 import { fetchUserPayments } from './usos/payments.mjs';
 import { createUpstreamHeaders, runWithBrowserUserAgent } from './upstream-browser.mjs';
 import {
@@ -72,6 +74,7 @@ const statsAccessLimiter = rateLimit({
   requestWasSuccessful: (req, res) => res.statusCode < 400 && hasValidStatsAccess(req),
 });
 const statsService = createStatsService({ storePath: STATS_STORE_PATH, locale: 'pl-PL' });
+const refreshContext = new AsyncLocalStorage();
 
 app.use(helmet({ contentSecurityPolicy: false }));
 app.use(cors({ origin: true, credentials: true }));
@@ -85,6 +88,7 @@ app.use((req, _res, next) => {
 app.use((req, _res, next) => {
   runWithBrowserUserAgent(req.headers['user-agent'], next);
 });
+app.use((req, _res, next) => refreshContext.run({ force: req.body?.force === true }, next));
 app.use((req, _res, next) => {
   if (req.path.startsWith('/api/') && req.path !== '/api/health') {
     statsService.recordDeviceActivity(req);
@@ -560,7 +564,7 @@ function isUsosGatewayError(error) {
     || message.includes('server is temporarily');
 }
 
-async function fetchUsosJson(endpoint, {
+async function fetchUsosJsonSource(endpoint, {
   token = '',
   secret = '',
   tokenMode = 'required',
@@ -615,6 +619,11 @@ async function fetchUsosJson(endpoint, {
   }
 }
 
+const usosReads = createUsosReadCache(fetchUsosJsonSource);
+function fetchUsosJson(endpoint, options = {}) {
+  assertUsosConfigured();
+  return usosReads.read(endpoint, { ...options, force: options.force ?? refreshContext.getStore()?.force ?? false });
+}
 const timetableGateway = createTimetableGateway(fetchUsosJson);
 for (const action of ['week', 'catalog', 'group', 'suggest']) {
   app.post(`/api/usos/timetable/${action}`, async (req, res) => {
@@ -1210,6 +1219,7 @@ app.post('/api/stats/access', async (req, res) => {
 });
 
 app.post('/api/stats/snapshot', async (req, res) => {
+  setPrivateNoStore(res);
   try {
     const { token, secret } = getUsosCredentials(req);
     const user = await fetchUsosJson('services/users/user', {
@@ -1224,8 +1234,8 @@ app.post('/api/stats/snapshot', async (req, res) => {
       return res.status(403).json({ error: 'Brak dostępu do statystyk.' });
     }
 
-    setPrivateNoStore(res);
-    return res.json({ ok: true, snapshot: statsService.getSnapshot() });
+    const { series, kpis, meta } = statsService.getSnapshot();
+    return res.json({ ok: true, snapshot: { series, kpis, meta, network: usosReads.snapshot() } });
   } catch (error) {
     return sendUsosError(res, error);
   }

@@ -56,7 +56,7 @@ export function createTimetableGateway(fetchUsos, { now = Date.now, spacing = 50
   let queue = Promise.resolve();
   let previousStart = 0;
   async function read(credentials, endpoint, params, ttl = 6 * HOUR, force = false) {
-    const owner = crypto.createHash('sha256').update(credentials.token).digest('hex');
+    const owner = crypto.createHash('sha256').update(JSON.stringify([credentials.token, credentials.secret])).digest('hex');
     const key = `${owner}:${endpoint}:${JSON.stringify(params)}`;
     const cached = entries.get(key);
     if (cached?.data !== undefined && now() - cached.ts < (force ? 5 * 60_000 : ttl)) return cached.data;
@@ -71,7 +71,7 @@ export function createTimetableGateway(fetchUsos, { now = Date.now, spacing = 50
       if (wait) await new Promise((resolve) => setTimeout(resolve, wait));
       previousStart = now();
       try {
-        const data = await fetchUsos(endpoint, { ...credentials, params });
+        const data = await fetchUsos(endpoint, { ...credentials, params, force });
         entries.delete(key); entries.set(key, { data, ts: now() });
         while (entries.size > 1500) entries.delete(entries.keys().next().value);
         return data;

@@ -220,7 +220,17 @@ function hasUsosScope(session: SessionData, scope: string): boolean {
   return Boolean(session.usos?.scopes?.includes(scope));
 }
 
+const pendingReads = new Map<string, Promise<unknown>>();
 async function postUsosEndpoint<T>(usos: UsosSessionData, path: string, payload: Record<string, unknown> = {}): Promise<T> {
+  const key = JSON.stringify([usos.accessToken, usos.accessTokenSecret, usos.scopes, path, payload]);
+  const existing = pendingReads.get(key);
+  if (existing) return existing as Promise<T>;
+  const operation = requestUsosEndpoint<T>(usos, path, payload);
+  pendingReads.set(key, operation);
+  try { return await operation; } finally { pendingReads.delete(key); }
+}
+
+async function requestUsosEndpoint<T>(usos: UsosSessionData, path: string, payload: Record<string, unknown>): Promise<T> {
   const owner = loadSession()?.usos?.accessToken;
   const response = await apiFetch(`${API_BASE}${path}`, {
     method: 'POST',
@@ -248,8 +258,15 @@ async function postUsosEndpoint<T>(usos: UsosSessionData, path: string, payload:
   return body;
 }
 
+const profiles = new Map<string, { data: UsosMeResponse; ts: number }>();
 async function fetchUsosMe(usos: UsosSessionData): Promise<UsosMeResponse> {
-  return postUsosEndpoint<UsosMeResponse>(usos, '/usos/me');
+  const key = JSON.stringify([usos.accessToken, usos.accessTokenSecret]);
+  const saved = profiles.get(key);
+  if (saved && Date.now() - saved.ts < 5 * 60_000) return saved.data;
+  const data = await postUsosEndpoint<UsosMeResponse>(usos, '/usos/me');
+  profiles.delete(key); profiles.set(key, { data, ts: Date.now() });
+  while (profiles.size > 8) profiles.delete(profiles.keys().next().value!);
+  return data;
 }
 
 function fixImageUrls(html: string): string {
@@ -449,14 +466,14 @@ export async function fetchCombinedSemesters(session: SessionData, studyId: stri
   return fetchSemesters(session, studyId);
 }
 
-export async function fetchGrades(session: SessionData): Promise<Grade[]> {
+export async function fetchGrades(session: SessionData, force = false): Promise<Grade[]> {
   if (!session.usos) return [];
-  const body = await postUsosEndpoint<{ grades?: Grade[] }>(session.usos, '/usos/grades');
+  const body = await postUsosEndpoint<{ grades?: Grade[] }>(session.usos, '/usos/grades', { force });
   return ensureArray<Grade>(body.grades);
 }
 
-export async function fetchCombinedGrades(session: SessionData): Promise<Grade[]> {
-  return fetchGrades(session);
+export async function fetchCombinedGrades(session: SessionData, force = false): Promise<Grade[]> {
+  return fetchGrades(session, force);
 }
 
 export async function fetchCourseTests(
@@ -479,16 +496,17 @@ export async function fetchCourseTests(
   };
 }
 
-export async function fetchFinance(session: SessionData, studyId: string | null): Promise<FinanceRecord[]> {
+export async function fetchFinance(session: SessionData, studyId: string | null, force = false): Promise<FinanceRecord[]> {
   void studyId;
   if (!session.usos) return [];
-  const body = await postUsosEndpoint<{ records?: FinanceRecord[] }>(session.usos, '/usos/finance');
+  const body = await postUsosEndpoint<{ records?: FinanceRecord[] }>(session.usos, '/usos/finance', { force });
   return ensureArray<FinanceRecord>(body.records);
 }
 
 export async function fetchInfo(
   session: SessionData,
   studyId: string | null,
+  force = false,
 ): Promise<{ details: StudyDetails | null; history: StudyHistoryItem[]; els?: ElsCard | null; calendarEvents?: CalendarEvent[] }> {
   if (!session.usos) {
     return { details: null, history: [], els: null, calendarEvents: [] };
@@ -499,12 +517,12 @@ export async function fetchInfo(
     history: StudyHistoryItem[];
     els?: ElsCard | null;
     calendarEvents?: CalendarEvent[];
-  }>(session.usos, '/usos/info', { studyId });
+  }>(session.usos, '/usos/info', { studyId, force });
 }
 
-export async function fetchCreditSummary(session: SessionData, studyId: string | null): Promise<CreditSummary | null> {
+export async function fetchCreditSummary(session: SessionData, studyId: string | null, force = false): Promise<CreditSummary | null> {
   if (!session.usos) return null;
-  const body = await postUsosEndpoint<{ summary?: CreditSummary }>(session.usos, '/usos/credits', { studyId });
+  const body = await postUsosEndpoint<{ summary?: CreditSummary }>(session.usos, '/usos/credits', { studyId, force });
   return body.summary ?? null;
 }
 
@@ -570,6 +588,9 @@ export async function fetchStatsSnapshot(session: SessionData): Promise<StatsSna
     }),
   });
   const body = (await response.json().catch(() => ({}))) as { snapshot?: StatsSnapshot; error?: string };
+  if (loadSession()?.usos?.accessToken !== session.usos.accessToken) {
+    throw new DOMException('Konto zmieniło się podczas pobierania.', 'AbortError');
+  }
 
   if (!response.ok) {
     const errorMessage = getFriendlyErrorMessage(body.error || `Stats snapshot HTTP ${response.status}`);

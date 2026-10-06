@@ -97,7 +97,7 @@ const LinksScreen = lazy(() => import('./app/screens/ContentScreens').then((modu
 const NewsDetailScreen = lazy(() => import('./app/screens/ContentScreens').then((module) => ({ default: module.NewsDetailScreen })));
 const NewsScreen = lazy(() => import('./app/screens/ContentScreens').then((module) => ({ default: module.NewsScreen })));
 const SettingsScreen = lazy(() => import('./app/screens/ContentScreens').then((module) => ({ default: module.SettingsScreen })));
-const StatsScreen = lazy(() => import('./app/screens/ContentScreens').then((module) => ({ default: module.StatsScreen })));
+const StatsScreen = lazy(() => import('./app/screens/StatsScreen'));
 
 const SESSION_VALIDATE_INTERVAL_MS = 30 * 24 * 60 * 60_000;
 const EMPTY_FINANCE_SNAPSHOT: FinanceSnapshot = { records: [], fetchedAt: 0 };
@@ -174,6 +174,7 @@ function App() {
   const sessionExpiryHandledRef = useRef(false);
   const sessionCheckInFlightRef = useRef<Promise<boolean> | null>(null);
   const lastSessionCheckRef = useRef<{ key: string; ts: number }>({ key: '', ts: 0 });
+  const lastSessionAttemptRef = useRef<{ key: string; ts: number }>({ key: '', ts: 0 });
   const activeSessionKeyRef = useRef(sessionKey);
   const overlayBackAttemptRef = useRef<(() => BackInterceptResult) | null>(null);
   const newsGalleryBackRef = useRef<(() => BackInterceptResult) | null>(null);
@@ -588,6 +589,7 @@ function App() {
         void clearTimetableAccount(previous.userId);
         void removeResources(`suggest:${previous.userId}:`);
         void removeResources(`photo:${previous.userId}`, true);
+        void removeResources(`stats:${previous.userId}`, true);
       }
       saveSession(null);
       sessionStorage.removeItem('usos_request_token_secret');
@@ -623,6 +625,8 @@ function App() {
     if (sessionCheckInFlightRef.current) {
       return sessionCheckInFlightRef.current;
     }
+    if (!force && lastSessionAttemptRef.current.key === key && Date.now() - lastSessionAttemptRef.current.ts < 5 * 60_000) return true;
+    lastSessionAttemptRef.current = { key, ts: Date.now() };
 
     const checkPromise = (async () => {
       try {
@@ -892,8 +896,8 @@ function App() {
     setGradesLoad(true); setGlobalError('');
     try {
       const [result, summary] = await Promise.allSettled([
-        fetchCombinedGrades(session),
-        forceRefresh || !savedCredits ? fetchCreditSummary(session, activeStudyId) : Promise.resolve(savedCredits),
+        fetchCombinedGrades(session, forceRefresh),
+        forceRefresh || !cache.loadCredits(activeStudyId || '') ? fetchCreditSummary(session, activeStudyId, forceRefresh) : Promise.resolve(savedCredits),
       ]);
       if (result.status === 'rejected') throw result.reason;
       if (summary.status === 'fulfilled' && summary.value) {
@@ -917,7 +921,7 @@ function App() {
     if (!(await allowNetwork(session, 'finance', forceRefresh, !!cache.loadFinance(activeStudyId), saved !== null))) return;
     setFinanceLoading(true); setGlobalError('');
     try {
-      const records = await fetchFinance(session, activeStudyId);
+      const records = await fetchFinance(session, activeStudyId, forceRefresh);
       const snapshot: FinanceSnapshot = { records, fetchedAt: Date.now() };
       cache.saveFinance(activeStudyId, snapshot); setFinanceSnapshot(snapshot);
       finishRefresh(scope, 'finance', true);
@@ -939,7 +943,11 @@ function App() {
     if (!(await allowNetwork(session, 'info', forceRefresh, !!cache.loadInfo(activeStudyId), saved !== null))) return;
     setInfoLoading(true); setGlobalError('');
     try {
-      const [info, summary] = await Promise.allSettled([fetchInfo(session, activeStudyId), fetchCreditSummary(session, activeStudyId)]);
+      const savedCredits = cache.loadCredits(activeStudyId);
+      const [info, summary] = await Promise.allSettled([
+        fetchInfo(session, activeStudyId, forceRefresh),
+        forceRefresh || !savedCredits ? fetchCreditSummary(session, activeStudyId, forceRefresh) : Promise.resolve(savedCredits),
+      ]);
       if (info.status === 'rejected') throw info.reason;
       const payload = { ...info.value, credits: summary.status === 'fulfilled' ? summary.value : saved?.credits ?? null };
       cache.saveInfo(activeStudyId, payload);
@@ -969,22 +977,31 @@ function App() {
 
   const loadStatsData = useCallback(async (forceRefresh = false) => {
     if (!session || !canOpenStats) return;
-    if (statsSnapshot && !forceRefresh) return;
-
+    const scope = `${session.userId}:${session.activeStudyId || ''}`;
+    const owner = getSessionSignature(session);
+    const saved = await readResource<StatsSnapshot>(`stats:${session.userId}`);
+    if (activeSessionKeyRef.current !== owner) return;
+    if (saved) setStatsSnapshot(saved.data);
+    if (!(await allowNetwork(session, 'stats', forceRefresh, !!saved && Date.now() - saved.ts < 15 * 60_000, !!saved))) return;
     setStatsLoading(true);
     setStatsError('');
     try {
       const snapshot = await fetchStatsSnapshot(session);
+      if (activeSessionKeyRef.current !== owner) { finishRefresh(scope, 'stats', false); return; }
+      await saveResource(`stats:${session.userId}`, snapshot);
       setStatsSnapshot(snapshot);
+      finishRefresh(scope, 'stats', true);
     } catch (e) {
+      finishRefresh(scope, 'stats', false);
+      if (activeSessionKeyRef.current !== owner) return;
       if (handleSessionError(e)) return;
       const message = getFriendlyErrorMessage(e, 'Nie można pobrać statystyk.');
       setStatsError(message);
-      if (!statsSnapshot) setGlobalError(message);
+      if (!saved && navigator.onLine) setGlobalError(message);
     } finally {
       setStatsLoading(false);
     }
-  }, [canOpenStats, handleSessionError, session, statsSnapshot]);
+  }, [canOpenStats, handleSessionError, session, allowNetwork]);
 
   // ── Load on screen enter ──────────────────────────────────────────────────
   const prevScreen = useRef<ScreenKey | null>(null);
@@ -1481,7 +1498,6 @@ function App() {
         statsLoading={statsLoading}
         statsError={statsError}
         language={settings.language}
-        t={t}
         onRefresh={() => loadStatsData(true)}
       />
     );
@@ -1665,7 +1681,7 @@ function App() {
     } else if (screen === 'news') {
       actions.push({ key: 'refresh', icon: 'refresh', label: t('plan.refresh'), onClick: () => void loadNewsData(true), active: false });
     } else if (screen === 'stats') {
-      actions.push({ key: 'refresh', icon: 'refresh', label: t('stats.refresh'), onClick: () => void loadStatsData(true), active: statsLoading });
+      actions.push({ key: 'refresh', icon: 'refresh', label: t('stats.refresh'), onClick: () => void loadStatsData(true), active: statsLoading, disabled: statsLoading });
     }
 
     const hasSearchFilter = screen === 'plan' && !!planSearchQ.trim();

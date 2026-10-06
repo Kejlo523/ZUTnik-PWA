@@ -219,6 +219,7 @@ function loadCTimestamp(key: string): number {
 
 export const cache = {
   saveCredits: (studyId: string, data: CreditSummary) => saveC(ck('credits', studyId), data),
+  loadCredits: (studyId: string): CreditSummary | null => loadC(ck('credits', studyId), TTL_MS.info),
   loadCreditsForce: (studyId: string): CreditSummary | null => loadCForce(ck('credits', studyId)),
   // Studies
   saveStudies: (data: Study[]) => saveC(ck('studies'), data),

@@ -173,36 +173,25 @@ export interface StatsKpis {
   newDevicesToday: number;
 }
 
-export interface StatsPeak {
-  label: string;
-  value: number;
-}
-
-export interface StatsCountShare {
-  key?: string;
-  label: string;
-  count: number;
-  share: number;
-}
-
 export interface StatsSnapshot {
+  network?: {
+    startedAt: number;
+    updatedAt: number;
+    requests: number;
+    cacheHits: number;
+    coalesced: number;
+    backoffSkips: number;
+    errors: number;
+    entries: number;
+    bytes: number;
+    pending: number;
+    endpoints: Array<{ endpoint: string; requests: number; cacheHits: number; coalesced: number; backoffSkips: number; errors: number }>;
+  };
   series: StatsSeriesDay[];
   kpis: StatsKpis;
-  peaks: {
-    active: StatsPeak | null;
-    logins: StatsPeak | null;
-  };
-  topDays: Array<StatsSeriesDay & { summaryLabel: string }>;
-  recentRows: StatsSeriesDay[];
-  activeMix: StatsCountShare[];
-  loginMethods: StatsCountShare[];
-  loginMethodCoverage: {
-    recordedTotal: number;
-    overallTotal: number;
-    isPartial: boolean;
-  };
   meta: {
     todayKey: string;
+    usosTrackingSince?: string;
     trackedSinceLabel: string;
     updatedAtLabel: string;
     chartMax: number;

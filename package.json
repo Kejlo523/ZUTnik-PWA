@@ -12,7 +12,8 @@
     "preview": "vite preview",
     "start": "node server/index.mjs",
     "icons": "node scripts-generate-icons.mjs",
-    "test": "npm run test:mappers && npm run test:upstream-browser && npm run test:timetable && npm run test:unit",
+    "test": "npm run test:mappers && npm run test:upstream-browser && npm run test:timetable && npm run test:network && npm run test:unit",
+    "test:network": "node --test server/usos/read-cache.test.mjs server/stats/service.test.mjs",
     "test:mappers": "node --test server/usos/mappers.test.mjs server/usos/payments.test.mjs",
     "test:upstream-browser": "node server/upstream-browser.test.mjs",
     "test:timetable": "node --test server/usos/timetable.test.mjs",
@@ -23,6 +24,7 @@
   "dependencies": {
     "@fontsource/roboto": "^5.3.0",
     "@fontsource/roboto-condensed": "^5.2.8",
+    "chart.js": "^4.5.1",
     "cors": "^2.8.6",
     "dotenv": "^17.3.1",
     "embla-carousel-react": "^8.6.0",

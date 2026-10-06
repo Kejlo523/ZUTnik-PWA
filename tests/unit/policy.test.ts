@@ -29,6 +29,43 @@ describe('network policy', () => {
     expect(beginRefresh('test', 'grades', false, false, false).allow).toBe(true);
     finishRefresh('test', 'grades', true);
   });
+  it('retains the stats cooldown in memory when local storage is blocked', () => {
+    vi.useFakeTimers(); vi.setSystemTime(1_000_000);
+    const blockedRead = vi.spyOn(localStorage, 'getItem').mockImplementation(() => { throw new Error('Blocked'); });
+    const blockedWrite = vi.spyOn(localStorage, 'setItem').mockImplementation(() => { throw new Error('Blocked'); });
+    try {
+      expect(beginRefresh('private-stats', 'stats', true, false, false).allow).toBe(true);
+      expect(beginRefresh('private-stats', 'stats', true, false, false).reason).toBe('inflight');
+      finishRefresh('private-stats', 'stats', true);
+      vi.advanceTimersByTime(120_000);
+      expect(beginRefresh('private-stats', 'stats', true, false, false).reason).toBe('cooldown');
+      vi.advanceTimersByTime(180_000);
+      expect(beginRefresh('private-stats', 'stats', true, false, false).allow).toBe(true);
+      finishRefresh('private-stats', 'stats', true);
+    } finally { blockedRead.mockRestore(); blockedWrite.mockRestore(); }
+  });
+  it('prefers a newer memory ledger when writes fail but an old stored ledger is readable', () => {
+    vi.useFakeTimers(); vi.setSystemTime(1_000_000);
+    localStorage.setItem('zutnik_refresh:full-storage:stats', JSON.stringify({ ...ledger, lastAttempt: 900_000 }));
+    const blocked = vi.spyOn(localStorage, 'setItem').mockImplementation(() => { throw new Error('Quota exceeded'); });
+    try {
+      expect(beginRefresh('full-storage', 'stats', true, false, false).allow).toBe(true);
+      finishRefresh('full-storage', 'stats', true);
+      vi.advanceTimersByTime(120_000);
+      expect(beginRefresh('full-storage', 'stats', true, false, false).reason).toBe('cooldown');
+    } finally { blocked.mockRestore(); }
+  });
+  it('does not repeat automatic grade reads if a successful response could not be cached', () => {
+    vi.useFakeTimers(); vi.setSystemTime(1_000_000);
+    expect(beginRefresh('uncached-success', 'grades', false, false, false).allow).toBe(true);
+    finishRefresh('uncached-success', 'grades', true);
+    vi.advanceTimersByTime(60_000);
+    expect(beginRefresh('uncached-success', 'grades', false, false, false).reason).toBe('recent');
+    expect(beginRefresh('new-range', 'plan', false, false, false).allow).toBe(true);
+    finishRefresh('new-range', 'plan', true);
+    expect(beginRefresh('new-range', 'plan', false, false, false).allow).toBe(true);
+    finishRefresh('new-range', 'plan', true);
+  });
 });
 describe('cache and sessions', () => {
   it('separates accounts and does not extend freshness when read', () => {

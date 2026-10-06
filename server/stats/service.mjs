@@ -76,6 +76,8 @@ function createEmptyStatsStore() {
     dailyActive: {},
     successfulLoginsTotal: 0,
     successfulLoginsByDay: {},
+    successfulUsosLoginsByDay: {},
+    usosTrackingSince: new Date().toISOString(),
     successfulLoginsByMethod: createEmptyMethodMap(),
   };
 }
@@ -115,12 +117,20 @@ function normalizeStatsStore(value) {
     }
   }
 
+  const methods = normalizeMethodMap(payload.successfulLoginsByMethod);
+  const allKnownUsos = normalizeCount(payload.successfulLoginsTotal) === methods.usos && !methods.mzut && !methods.other;
+  const usosDays = {};
+  for (const [day, count] of Object.entries(payload.successfulUsosLoginsByDay ?? (allKnownUsos ? normalizedLoginsByDay : {}))) {
+    if (toDayKey(day)) usosDays[day] = normalizeCount(count);
+  }
   return {
     version: 2,
     devices: normalizedDevices,
     dailyActive: normalizedDailyActive,
     successfulLoginsTotal: normalizeCount(payload.successfulLoginsTotal),
     successfulLoginsByDay: normalizedLoginsByDay,
+    successfulUsosLoginsByDay: usosDays,
+    usosTrackingSince: String(payload.usosTrackingSince || (allKnownUsos && Object.keys(usosDays).sort()[0] ? `${Object.keys(usosDays).sort()[0]}T00:00:00` : new Date().toISOString())),
     successfulLoginsByMethod: normalizeMethodMap(payload.successfulLoginsByMethod),
   };
 }
@@ -195,7 +205,7 @@ function buildSeries(store, today, locale) {
       labelShort: dayFormatter.format(date),
       labelLong: fullFormatter.format(date),
       activeDevices: (store.dailyActive[key] || []).length,
-      successfulLogins: store.successfulLoginsByDay[key] || 0,
+      successfulLogins: store.successfulUsosLoginsByDay[key] || 0,
       newDevices: newDevicesByDay[key] || 0,
     });
   }
@@ -292,6 +302,9 @@ export function createStatsService({ storePath, locale = 'pl-PL' }) {
         delete statsStore.successfulLoginsByDay[day];
       }
     }
+    for (const day of Object.keys(statsStore.successfulUsosLoginsByDay)) {
+      if (day < cutoffKey) delete statsStore.successfulUsosLoginsByDay[day];
+    }
   }
 
   function getRequestDeviceKey(req) {
@@ -342,6 +355,7 @@ export function createStatsService({ storePath, locale = 'pl-PL' }) {
   }
 
   function recordSuccessfulLogin(req, method) {
+    if (normalizeMethodKey(method) !== 'usos') return;
     pruneStatsBuckets();
     const dayKey = formatDayKey();
     const nowIso = new Date().toISOString();
@@ -356,6 +370,7 @@ export function createStatsService({ storePath, locale = 'pl-PL' }) {
 
     statsStore.successfulLoginsTotal += 1;
     statsStore.successfulLoginsByDay[dayKey] = (statsStore.successfulLoginsByDay[dayKey] || 0) + 1;
+    statsStore.successfulUsosLoginsByDay[dayKey] = (statsStore.successfulUsosLoginsByDay[dayKey] || 0) + 1;
     statsStore.successfulLoginsByMethod[methodKey] = (statsStore.successfulLoginsByMethod[methodKey] || 0) + 1;
     scheduleStatsPersist();
   }
@@ -382,14 +397,11 @@ export function createStatsService({ storePath, locale = 'pl-PL' }) {
     const trackedSinceLabel = trackedSinceKey
       ? new Intl.DateTimeFormat(locale, { dateStyle: 'medium' }).format(new Date(`${trackedSinceKey}T00:00:00`))
       : 'Brak danych';
-    const methodTotal = Object.values(statsStore.successfulLoginsByMethod).reduce((sum, count) => sum + count, 0);
     const loginMethods = [
-      { key: 'mzut', label: 'Legacy API', count: statsStore.successfulLoginsByMethod.mzut || 0 },
       { key: 'usos', label: 'USOS OAuth', count: statsStore.successfulLoginsByMethod.usos || 0 },
-      { key: 'other', label: 'Inne', count: statsStore.successfulLoginsByMethod.other || 0 },
     ].map((method) => ({
       ...method,
-      share: percentage(method.count, methodTotal),
+        share: method.count ? 100 : 0,
     }));
 
     const topDays = [...series]
@@ -417,7 +429,7 @@ export function createStatsService({ storePath, locale = 'pl-PL' }) {
         returningShare30d: activeStats.returningShare,
         newDevices30d,
         successfulLoginsToday: latest.successfulLogins,
-        successfulLoginsTotal: statsStore.successfulLoginsTotal,
+        successfulLoginsTotal: statsStore.successfulLoginsByMethod.usos,
         totalDevices: Object.keys(statsStore.devices).length,
         totalApiHits,
         averageActive7d: average(last7.map((day) => day.activeDevices)),
@@ -445,12 +457,13 @@ export function createStatsService({ storePath, locale = 'pl-PL' }) {
       activeMix: activeStats.buckets,
       loginMethods,
       loginMethodCoverage: {
-        recordedTotal: methodTotal,
-        overallTotal: statsStore.successfulLoginsTotal,
-        isPartial: methodTotal < statsStore.successfulLoginsTotal,
+        recordedTotal: statsStore.successfulLoginsByMethod.usos,
+        overallTotal: statsStore.successfulLoginsByMethod.usos,
+        isPartial: false,
       },
       meta: {
         todayKey,
+        usosTrackingSince: statsStore.usosTrackingSince,
         trackedSinceLabel,
         updatedAtLabel: new Intl.DateTimeFormat(locale, {
           dateStyle: 'medium',

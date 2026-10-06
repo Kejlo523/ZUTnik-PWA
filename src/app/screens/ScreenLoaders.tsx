@@ -6,6 +6,15 @@ export function MetricSkeletons({ count = 3, className = '' }: { count?: number;
   return <div className={`metrics-row ${className}`}>{Array.from({ length: count }, (_, index) => <div key={index} className="metric-card metric-card-skeleton"><Skeleton className="skeleton-line skeleton-line-xs" style={{ width: '64%' }} /><Skeleton className="skeleton-line skeleton-line-lg" style={{ width: '46%' }} /></div>)}</div>;
 }
 
+export function StatsLoadingSkeleton() {
+  return <SkeletonRegion label="Ładowanie statystyk">
+    <Skeleton className="skeleton-line skeleton-line-xs" style={{ width: '60%', marginBottom: 20 }} />
+    <div className="stats-tabs stats-tabs-loading" aria-hidden><Skeleton className="skeleton-line skeleton-line-md" style={{ width: '42%' }} /><Skeleton className="skeleton-line skeleton-line-md" style={{ width: '42%' }} /></div>
+    <div className="stats-kpi-grid">{[0, 1, 2, 3].map((key) => <div key={key} className="stats-kpi" aria-hidden><Skeleton className="skeleton-line skeleton-line-xs" style={{ width: '80%' }} /><Skeleton className="skeleton-line skeleton-line-lg" style={{ width: '45%' }} /><Skeleton className="skeleton-line skeleton-line-xs" style={{ width: '60%' }} /></div>)}</div>
+    <div className="stats-section" aria-hidden><Skeleton className="skeleton-line skeleton-line-md" style={{ width: '42%' }} /><div className="stats-metric-select"><Skeleton className="skeleton-line skeleton-line-sm" style={{ width: '70%' }} /></div><div className="stats-canvas stats-chart-loading">{[30, 65, 45, 80, 55, 90, 70, 50, 76, 88, 65, 95].map((height, i) => <Skeleton key={i} style={{ height: `${height}%` }} />)}</div></div>
+  </SkeletonRegion>;
+}
+
 export function GradesLoadingSkeleton({ summary = false }: { summary?: boolean }) {
   return <SkeletonRegion className="grades-loading" label="Ładowanie ocen">
     {summary && <div className="grades-header-wrapper"><MetricSkeletons /></div>}
@@ -46,6 +55,7 @@ export function GradeMetrics({ summary, t }: { summary: { avg: string; ectsSem: 
 }
 
 export function ScreenChunkFallback({ screen, gradesSummary, t }: { screen: ScreenKey; gradesSummary: { avg: string; ectsSem: string; ectsTotal: string }; t: TranslateFn }) {
+  if (screen === 'stats') return <section className="screen stats-screen"><StatsLoadingSkeleton /></section>;
   if (screen === 'grades') return <section className="screen grades-screen"><GradeMetrics summary={gradesSummary} t={t} /><GradesLoadingSkeleton /></section>;
   if (screen === 'finance') return <section className="screen finance-screen"><FinanceLoadingSkeleton /></section>;
   if (screen === 'info') return <section className="screen info-screen info-screen-full"><InfoMainLoadingSkeleton /></section>;

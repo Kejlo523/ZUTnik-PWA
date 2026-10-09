@@ -8,6 +8,8 @@ import type { NewsItem, UsefulLink } from '../../types';
 import { loadSession, type AppSettings } from '../../services/storage';
 import { parseSettingsBackup } from '../../services/settingsBackup';
 import { loadHomeTiles } from '../../services/homeTiles';
+import { THEME_OPTIONS } from '../../services/theme';
+import { CustomPaletteEditor } from '../components/CustomPaletteEditor';
 import type { TranslateFn } from '../viewTypes';
 import { LOGO_SRC } from '../constants';
 import { Ic, Select, Skeleton, SkeletonRegion, Toggle } from '../ui';
@@ -601,8 +603,10 @@ export function SettingsScreen({ settings, setSettings, t }: SettingsScreenProps
       <div className="settings-section-body">
         <div className="settings-select-row"><label htmlFor="app-theme">{t('settings.theme')}</label><p>{t('settings.themeDescription')}</p>
           <Select id="app-theme" value={settings.theme} onChange={(event) => setSettings((current) => ({ ...current, theme: event.target.value as AppSettings['theme'] }))}>
-            {(['system', 'light', 'dark'] as const).map((theme) => <option key={theme} value={theme}>{t(`settings.theme${theme[0].toUpperCase()}${theme.slice(1)}`)}</option>)}
+            {THEME_OPTIONS.map((theme) => <option key={theme} value={theme}>{t(`settings.theme${theme[0].toUpperCase()}${theme.slice(1)}`)}</option>)}
           </Select>
+          {settings.theme === 'custom' && <CustomPaletteEditor value={settings.customPalette} t={t}
+            onChange={(customPalette) => setSettings((current) => ({ ...current, customPalette }))} />}
         </div>
         <div className="settings-select-row"><label htmlFor="app-language">{t('settings.language')}</label><p>{t('settings.languageDescription')}</p><Select id="app-language" value={settings.language} onChange={(event) => setSettings((current) => ({ ...current, language: event.target.value as 'pl' | 'en' }))}><option value="pl">Polski</option><option value="en">English</option></Select></div>
       </div>

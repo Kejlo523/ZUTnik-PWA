@@ -56,9 +56,10 @@ function ActivityChart({ days, metric, label, locale }: { days: StatsSeriesDay[]
       chart.data.datasets[0].backgroundColor = color();
       for (const axis of ['x', 'y'] as const) chart.options.scales![axis]!.ticks!.color = colors.getPropertyValue('--mz-muted');
       chart.options.scales!.y!.grid!.color = colors.getPropertyValue('--mz-border-soft');
-      chart.update('none');
+      // The zero-duration resize transition also refreshes shared bar styles.
+      chart.update('resize');
     });
-    observer.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme', 'data-theme-variant', 'style'] });
     return () => { observer.disconnect(); chart.destroy(); };
   }, [days, metric, label, locale]);
   return <div className="stats-canvas"><canvas ref={ref} role="img" aria-label={label} /></div>;

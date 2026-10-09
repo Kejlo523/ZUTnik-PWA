@@ -13,6 +13,7 @@ import type {
   StudyDetails,
   StudyHistoryItem,
 } from '../types';
+import { DEFAULT_PALETTE, isThemePreference, normalizePalette, type CustomPalette, type ThemePreference } from './theme';
 
 const SESSION_KEY = 'zutnik_pwa_session';
 const SETTINGS_KEY = 'zutnik_pwa_settings';
@@ -33,7 +34,8 @@ export function clearAccountCache(userId: string) {
 
 export interface AppSettings {
   language: 'pl' | 'en';
-  theme: 'system' | 'light' | 'dark';
+  theme: ThemePreference;
+  customPalette?: CustomPalette;
   notificationsEnabled: boolean;
   refreshMinutes: 30 | 60 | 120;
   compactPlan: boolean;
@@ -43,15 +45,12 @@ export interface AppSettings {
 const defaultSettings: AppSettings = {
   language: 'pl',
   theme: 'system',
+  customPalette: { ...DEFAULT_PALETTE },
   notificationsEnabled: true,
   refreshMinutes: 30,
   compactPlan: false,
   gradesGrouping: true,
 };
-
-function normalizeThemePreference(value: unknown): AppSettings['theme'] {
-  return value === 'light' || value === 'dark' || value === 'system' ? value : 'system';
-}
 
 export function loadSession(): SessionData | null {
   if (volatileSession !== undefined) { setCacheAccount(volatileSession?.userId); return volatileSession; }
@@ -92,11 +91,12 @@ export function saveSession(session: SessionData | null): boolean {
 export function loadSettings(): AppSettings {
   try {
     const raw = window.localStorage.getItem(SETTINGS_KEY) ?? window.localStorage.getItem(LEGACY_SETTINGS_KEY);
-    if (!raw) return { ...defaultSettings };
+    if (!raw) return { ...defaultSettings, customPalette: { ...DEFAULT_PALETTE } };
     const parsed = JSON.parse(raw) as Partial<AppSettings>;
     const settings: AppSettings = {
       language: parsed.language === 'en' ? 'en' : 'pl',
-      theme: normalizeThemePreference(parsed.theme),
+      theme: isThemePreference(parsed.theme) ? parsed.theme : 'system',
+      customPalette: normalizePalette(parsed.customPalette),
       notificationsEnabled: typeof parsed.notificationsEnabled === 'boolean' ? parsed.notificationsEnabled : true,
       refreshMinutes: [30, 60, 120].includes(parsed.refreshMinutes ?? 30) ? (parsed.refreshMinutes as 30 | 60 | 120) : 30,
       compactPlan: Boolean(parsed.compactPlan),
@@ -106,7 +106,7 @@ export function loadSettings(): AppSettings {
     window.localStorage.removeItem(LEGACY_SETTINGS_KEY);
     return settings;
   } catch {
-    return { ...defaultSettings };
+    return { ...defaultSettings, customPalette: { ...DEFAULT_PALETTE } };
   }
 }
 

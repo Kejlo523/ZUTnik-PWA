@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import './App.css';
 import { PlanScreen } from './app/screens/PlanScreen';
 import { useTimetable } from './hooks/useTimetable';
@@ -88,6 +88,7 @@ import { AppNavigation } from './app/AppNavigation';
 import { PwaUpdateNotice } from './app/components/PwaUpdateNotice';
 import { PwaInstallSheet } from './app/components/PwaInstallSheet';
 import { Sheet } from './app/components/Sheet';
+import { applyThemePreference } from './services/theme';
 
 const GradesScreen = lazy(() => import('./app/screens/StudyScreens').then((module) => ({ default: module.GradesScreen })));
 const FinanceScreen = lazy(() => import('./app/screens/StudyScreens').then((module) => ({ default: module.FinanceScreen })));
@@ -141,28 +142,11 @@ function keepRealGrades(items: Grade[]): Grade[] {
   return items.filter((item) => item.grade?.trim() || !isFinalGradeType(item.type, item.subjectName));
 }
 
-function applyThemePreference(theme: AppSettings['theme']): void {
-  const root = document.documentElement;
-  const resolvedTheme = theme === 'system'
-    ? window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark'
-    : theme;
-  root.dataset.theme = resolvedTheme;
-
-  // Page metadata overrides the manifest's launch color in supported browsers.
-  const chromeColor = getComputedStyle(root).getPropertyValue('--mz-bg').trim();
-  const themeColor = document.querySelector<HTMLMetaElement>('meta[name="theme-color"]');
-  if (themeColor && chromeColor && themeColor.content !== chromeColor) {
-    themeColor.content = chromeColor;
-  }
-  const colorScheme = document.querySelector<HTMLMetaElement>('meta[name="color-scheme"]');
-  if (colorScheme && colorScheme.content !== resolvedTheme) colorScheme.content = resolvedTheme;
-}
-
 function App() {
   const [session, setSession] = useState<SessionData | null>(() => loadSession());
   const [settings, setSettings] = useState<AppSettings>(() => {
     const loaded = loadSettings();
-    applyThemePreference(loaded.theme);
+    applyThemePreference(loaded.theme, loaded.customPalette);
     return loaded;
   });
   const [studies, setStudies] = useState<Study[]>([]);
@@ -406,8 +390,10 @@ function App() {
   }, [selectedPlanEvent]);
 
   // ── Sync settings ─────────────────────────────────────────────────────────
+  useLayoutEffect(() => {
+    applyThemePreference(settings.theme, settings.customPalette);
+  }, [settings.theme, settings.customPalette]);
   useEffect(() => {
-    applyThemePreference(settings.theme);
     saveSettings(settings);
   }, [settings]);
 

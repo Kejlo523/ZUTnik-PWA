@@ -101,3 +101,34 @@ test('stats entry remains unavailable for other accounts', async ({ page }) => {
   await expect(page.getByRole('dialog').getByRole('button', { name: 'Statystyki', exact: true })).toHaveCount(0);
   expect(requests.some((path) => path.includes('/stats/'))).toBe(false);
 });
+
+test('Pink and live custom colors update chart pixels without reloading statistics', async ({ page }) => {
+  const errors: string[] = []; page.on('pageerror', (error) => errors.push(error.message));
+  await page.setViewportSize({ width: 393, height: 852 });
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  const count = await start(page, 'pink');
+  await expect(page.locator('canvas')).toBeVisible();
+  const chartColorPixels = () => page.locator('canvas').evaluate((canvas: HTMLCanvasElement) => {
+    const color = getComputedStyle(document.documentElement).getPropertyValue('--mz-primary').trim();
+    const rgb = [1, 3, 5].map((offset) => parseInt(color.slice(offset, offset + 2), 16));
+    const pixels = canvas.getContext('2d')!.getImageData(0, 0, canvas.width, canvas.height).data;
+    let matching = 0;
+    for (let i = 0; i < pixels.length; i += 4) if (pixels[i] === rgb[0] && pixels[i + 1] === rgb[1] && pixels[i + 2] === rgb[2] && pixels[i + 3] === 255) matching++;
+    return matching;
+  });
+  await expect.poll(chartColorPixels).toBeGreaterThan(100);
+  await page.screenshot({ path: 'test-results/stats-pink.png' });
+  await page.evaluate(() => document.documentElement.style.setProperty('--mz-primary', '#156bdd'));
+  await expect.poll(() => errors).toEqual([]);
+  await expect.poll(chartColorPixels).toBeGreaterThan(100);
+  expect(count()).toBe(1);
+  await page.locator('.primary-navigation').getByRole('button', { name: 'Więcej', exact: true }).click();
+  await page.getByRole('dialog').getByRole('button', { name: 'Ustawienia', exact: true }).click();
+  await page.locator('#app-theme').selectOption('custom');
+  await page.getByRole('button', { name: 'Paleta błękitna', exact: true }).click();
+  await openStats(page);
+  await expect.poll(chartColorPixels).toBeGreaterThan(100);
+  await page.screenshot({ path: 'test-results/stats-custom.png' });
+  expect(count()).toBe(1);
+  expect(errors).toEqual([]);
+});

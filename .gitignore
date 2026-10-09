@@ -27,3 +27,8 @@ server/data/
 *.sln
 *.sw?
 .env
+tests/browser/offline.spec.ts
+tests/browser/offline.spec.ts
+tests/browser/palette.spec.ts
+tests/browser/offline.spec.ts
+tests/browser/stats.spec.ts
